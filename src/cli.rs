@@ -31,7 +31,7 @@ pub const EXIT_CHANGED: u8 = 1;
 /// Exit status for errors: syntax, I/O, invalid arguments.
 pub const EXIT_ERROR: u8 = 2;
 
-/// A boring BibTeX formatter. That's the point.
+/// A boring BibTeX formatter.
 #[derive(Debug, Parser)]
 #[command(name = "boringbib", version, about, long_about = None, propagate_version = true)]
 pub struct Cli {

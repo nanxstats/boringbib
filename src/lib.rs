@@ -1,4 +1,4 @@
-//! A boring BibTeX formatter. That's the point.
+//! A boring BibTeX formatter.
 //!
 //! `boringbib` is a small command-line tool for BibTeX `.bib` files with two
 //! jobs:

@@ -1,8 +1,8 @@
 # Design
 
-`boringbib` is boring in the "choose boring technology" sense. Everything
-below serves three properties, in this order of priority whenever they
-conflict:
+`boringbib` is boring in the "choose boring technology" sense.
+Everything below serves three properties, in this order of priority
+whenever they conflict:
 
 1. **Lossless.** The user's data is never changed except where they asked.
 2. **Idempotent.** `fmt(fmt(x)) == fmt(x)`; `keys` twice is a no-op.
@@ -346,7 +346,7 @@ silently do nothing. `wrap = 0` means off; `sort_fields` is `false`, `true`
 (built-in order) or a list; `indent` is a number or `"tab"`.
 
 Resolution: command line over file over built-in default. To make that
-possible in both directions, every boolean flag has a `--no-…` twin
+possible in both directions, every boolean flag has a `--no-...` twin
 (`--align`/`--no-align`, `--trailing-comma`/`--no-trailing-comma`,
 `--wrap N`/`--no-wrap`, `--sort-fields`/`--no-sort-fields`,
 `--keep-bom`/`--no-keep-bom`, `--sort X`/`--no-sort`); when both are given,
@@ -435,7 +435,7 @@ Read, not copied:
   before entries, and the `localeCompare` key ordering that boringbib
   replaces with lowercase byte comparison.
 - **bibtex-tidy** (MIT): option naming (`--sort-fields`, `--trailing-comma`,
-  `--wrap`, `--no-…` twins) and, as a counter-example, its `--generate-keys`:
+  `--wrap`, `--no-...` twins) and, as a counter-example, its `--generate-keys`:
   it keeps hyphens (`fei-fei2006one-shot`), drops accented letters instead of
   transliterating them (`schlkopf2002learning`), and leaves `crossref`
   dangling after a rename.
