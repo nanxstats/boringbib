@@ -1,0 +1,9 @@
+---
+source: tests/fmt.rs
+expression: visible(&output)
+---
+@article{nested,
+  title    = {Outer {middle {inner {deepest}}} text},
+  author   = {{Barnes and Noble} and {\relax Ch}en, Guang},
+  abstract = {Braces {at {three {levels}}} spanning lines}
+}

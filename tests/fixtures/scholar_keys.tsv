@@ -1,0 +1,50 @@
+author	year	title	key	verified
+Vaswani, Ashish and Shazeer, Noam	2017	Attention is all you need	vaswani2017attention	yes
+van der Maaten, Laurens and Hinton, Geoffrey	2008	Visualizing data using {t-SNE}	vandermaaten2008visualizing	yes
+Laurens van der Maaten and Geoffrey Hinton	2008	Visualizing data using t-SNE	vandermaaten2008visualizing	yes
+Sch{\"o}lkopf, Bernhard and Smola, Alexander J.	2002	Learning with kernels: support vector machines, regularization, optimization, and beyond	scholkopf2002learning	yes
+Klambauer, G{\"u}nter and Unterthiner, Thomas	2017	Self-normalizing neural networks	klambauer2017self	yes
+{OpenAI}	2023	{GPT-4} Technical Report	openai2023gpt	yes
+Pascanu, Razvan and Mikolov, Tomas and Bengio, Yoshua	2013	On the difficulty of training recurrent neural networks	pascanu2013difficulty	yes
+Fei-Fei, Li and Fergus, Rob and Perona, Pietro	2006	One-shot learning of object categories	fei2006one	yes
+Wu, Zhirong and Song, Shuran	2015	{3D} {ShapeNets}: A deep representation for volumetric shapes	wu20153d	yes
+Ronneberger, Olaf and Fischer, Philipp and Brox, Thomas	2015	U-Net: Convolutional networks for biomedical image segmentation	ronneberger2015u	yes
+G{\'e}ron, Aur{\'e}lien	2022	Hands-on machine learning with Scikit-Learn, Keras, and TensorFlow	geron2022hands	yes
+Kingma, Diederik P and Welling, Max	2013	Auto-encoding variational bayes	kingma2013auto	yes
+Moosavi-Dezfooli, Seyed-Mohsen and Fawzi, Alhussein and Frossard, Pascal	2016	Deepfool: a simple and accurate method to fool deep neural networks	moosavi2016deepfool	yes
+Recht, Benjamin and Roelofs, Rebecca and Schmidt, Ludwig and Shankar, Vaishaal	2019	Do {ImageNet} classifiers generalize to {ImageNet}?	recht2019imagenet	yes
+Santurkar, Shibani and Tsipras, Dimitris and Ilyas, Andrew and Madry, Aleksander	2018	How does batch normalization help optimization?	santurkar2018does	yes
+M{\"u}ller, Rafael and Kornblith, Simon and Hinton, Geoffrey E	2019	When does label smoothing help?	muller2019does	yes
+Beyer, Lucas and H{\'e}naff, Olivier J and Kolesnikov, Alexander	2020	Are we done with {ImageNet}?	beyer2020we	yes
+Ovadia, Yaniv and Fertig, Emily	2019	Can you trust your model's uncertainty? Evaluating predictive uncertainty under dataset shift	ovadia2019can	yes
+Zhu, Michael and Gupta, Suyog	2017	To prune, or not to prune: exploring the efficacy of pruning for model compression	zhu2017prune	yes
+Kusner, Matt and Sun, Yu and Kolkin, Nicholas and Weinberger, Kilian	2015	From word embeddings to document distances	kusner2015word	yes
+Blalock, Davis and Gonzalez Ortiz, Jose Javier and Frankle, Jonathan and Guttag, John	2020	What is the state of neural network pruning?	blalock2020state	yes
+Ribeiro, Marco Tulio and Singh, Sameer and Guestrin, Carlos	2016	"Why should {I} trust you?" Explaining the predictions of any classifier	ribeiro2016should	yes
+Gulrajani, Ishaan and Lopez-Paz, David	2020	In search of lost domain generalization	gulrajani2020search	yes
+Katharopoulos, Angelos and Fleuret, Fran{\c{c}}ois	2018	Not all samples are created equal: Deep learning with importance sampling	katharopoulos2018not	yes
+Wolpert, David H and Macready, William G	1997	No free lunch theorems for optimization	wolpert1997no	yes
+Madry, Aleksander and Makelov, Aleksandar	2017	Towards deep learning models resistant to adversarial attacks	madry2017towards	yes
+Zhang, Kai and Zuo, Wangmeng	2017	Beyond a {Gaussian} denoiser: Residual learning of deep {CNN} for image denoising	zhang2017beyond	yes
+Simonyan, Karen and Zisserman, Andrew	2014	Very deep convolutional networks for large-scale image recognition	simonyan2014very	yes
+Dosovitskiy, Alexey and Beyer, Lucas	2020	An image is worth 16x16 words: Transformers for image recognition at scale	dosovitskiy2020image	yes
+Bertasius, Gedas and Wang, Heng and Torresani, Lorenzo	2021	Is space-time attention all you need for video understanding?	bertasius2021space	yes
+Ishida, Takashi and Yamane, Ikko	2020	Do we need zero training loss after achieving zero training error?	ishida2020we	yes
+Dwibedi, Debidatta and Aytar, Yusuf	2021	With a little help from my friends: Nearest-neighbor contrastive learning of visual representations	dwibedi2021little	yes
+Meister, Clara and Cotterell, Ryan and Vieira, Tim	2020	If beam search is the answer, what was the question?	meister2020if	yes
+Chen, Chaofan and Li, Oscar	2019	This looks like that: deep learning for interpretable image recognition	chen2019looks	yes
+Grathwohl, Will and Wang, Kuan-Chieh	2019	Your classifier is secretly an energy based model and you should treat it like one	grathwohl2019your	yes
+Park, Namuk and Kim, Songkuk	2022	How do vision transformers work?	park2022vision	yes
+Raghu, Maithra and Unterthiner, Thomas	2021	Do vision transformers see like convolutional neural networks?	raghu2021vision	yes
+Lee-Thorp, James and Ainslie, Joshua	2021	{FNet}: Mixing tokens with {Fourier} transforms	lee2021fnet	yes
+Tolstikhin, Ilya O and Houlsby, Neil	2021	{MLP-Mixer}: An all-{MLP} architecture for vision	tolstikhin2021mlp	yes
+Carion, Nicolas and Massa, Francisco	2020	End-to-end object detection with transformers	carion2020end	yes
+Kipf, Thomas N and Welling, Max	2016	Semi-supervised classification with graph convolutional networks	kipf2016semi	yes
+Wang, Xiaolong and Girshick, Ross	2018	Non-local neural networks	wang2018non	yes
+Baevski, Alexei and Zhou, Yuhao	2020	wav2vec 2.0: A framework for self-supervised learning of speech representations	baevski2020wav2vec	yes
+Achiam, Josh and Adler, Steven	2023	{GPT-4} technical report	achiam2023gpt	yes
+H{\'e}naff, Olivier	2020	Data-efficient image recognition with contrastive predictive coding	henaff2020data	yes
+Grinsztajn, L{\'e}o and Oyallon, Edouard and Varoquaux, Ga{\"e}l	2022	Why do tree-based models still outperform deep learning on typical tabular data?	grinsztajn2022tree	yes
+Sanh, Victor and Debut, Lysandre	2019	{DistilBERT}, a distilled version of {BERT}: smaller, faster, cheaper and lighter	sanh2019distilbert	yes
+Kaiser, Lukasz and Gomez, Aidan N	2017	One model to learn them all	kaiser2017one	yes
+Higgins, Irina and Matthey, Loic	2017	beta-{VAE}: Learning basic visual concepts with a constrained variational framework	higgins2017beta	yes

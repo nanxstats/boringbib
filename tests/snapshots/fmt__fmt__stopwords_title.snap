@@ -1,0 +1,15 @@
+---
+source: tests/fmt.rs
+expression: visible(&output)
+---
+@misc{notitle,
+  author = {Doe, John},
+  title  = {},
+  year   = {2020}
+}
+
+@misc{onlystop,
+  author = {Doe, Jane},
+  title  = {On the},
+  year   = {2020}
+}

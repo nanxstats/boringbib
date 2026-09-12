@@ -1,0 +1,26 @@
+---
+source: tests/fmt.rs
+expression: visible(&output)
+---
+% Leading comment with a blank line after it
+@misc{first,
+  title = {First}
+}
+
+  % An indented note that sits between entries, kept verbatim.
+
+This is prose. It mentions user@example.com and @article without braces.
+@article this looks like a broken entry and gets a warning
+@comment this is a BibTeX-style comment without braces
+@comment{A braced comment attached to the next entry}
+@misc{second,
+  title = {Second}
+}
+
+ % note on the same line as the closing brace
+@misc{third,
+  title = {Third}
+}
+
+% Trailing comment at the end of the file
+@comment{jabref-meta: databaseType:bibtex;}
