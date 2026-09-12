@@ -340,3 +340,189 @@ fn symlinks_are_followed() {
     );
     assert_eq!(fs::read_to_string(&target).expect("read"), expected());
 }
+
+fn expected_keys_map() -> String {
+    fixture("messy.keys.expected.tsv")
+}
+
+/// The mapping as `keys` prints it: old keys padded to the longest.
+fn expected_keys_stdout() -> String {
+    expected_keys_map()
+        .lines()
+        .map(|line| {
+            let (old, new) = line.split_once('\t').expect("two columns");
+            format!("{old:<15}  {new}\n")
+        })
+        .collect()
+}
+
+#[test]
+fn keys_prints_the_mapping_and_changes_nothing() {
+    let dir = TempDir::new("keys-print");
+    let path = dir.file("refs.bib");
+    fs::write(&path, messy()).expect("write");
+    boringbib()
+        .arg("keys")
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(expected_keys_stdout())
+        .stderr("");
+    assert_eq!(fs::read_to_string(&path).expect("read"), messy());
+}
+
+#[test]
+fn keys_write_is_atomic_and_idempotent() {
+    let dir = TempDir::new("keys-write");
+    let path = dir.file("refs.bib");
+    fs::write(&path, messy()).expect("write");
+    boringbib()
+        .args(["keys", "--write"])
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout(expected_keys_stdout());
+    assert_eq!(
+        fs::read_to_string(&path).expect("read"),
+        fixture("messy.keys.expected.bib")
+    );
+    boringbib()
+        .args(["keys", "--write"])
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout("");
+    assert_eq!(
+        fs::read_to_string(&path).expect("read"),
+        fixture("messy.keys.expected.bib")
+    );
+    assert_eq!(dir.entries(), 1, "no temporary files are left behind");
+}
+
+#[test]
+fn keys_map_file_has_three_columns() {
+    let dir = TempDir::new("keys-map");
+    let path = dir.file("refs.bib");
+    let map = dir.file("keys.tsv");
+    fs::write(&path, messy()).expect("write");
+    boringbib()
+        .args(["keys", "--write", "--map"])
+        .arg(&map)
+        .arg(&path)
+        .assert()
+        .success();
+    let expected: String = expected_keys_map()
+        .lines()
+        .map(|line| format!("{line}\t{}\n", path.display()))
+        .collect();
+    assert_eq!(fs::read_to_string(&map).expect("read map"), expected);
+}
+
+#[test]
+fn keys_only_and_keep() {
+    let dir = TempDir::new("keys-only");
+    let path = dir.file("refs.bib");
+    let input = "@misc{a, author = {Doe, Jane}, year = {2020}, title = {Same}}\n\
+        @misc{doe2020same, author = {Roe, Richard}, year = {2020}, title = {Other}}\n";
+    fs::write(&path, input).expect("write");
+    boringbib()
+        .args(["keys", "--only", "a"])
+        .arg(&path)
+        .assert()
+        .success()
+        .stdout("a  doe2020samea\n");
+    fs::write(dir.file("boringbib.toml"), "[keys]\nkeep = [\"a\"]\n").expect("write");
+    boringbib()
+        .current_dir(&dir.0)
+        .args(["keys", "refs.bib"])
+        .assert()
+        .success()
+        .stdout("doe2020same  roe2020other\n");
+}
+
+#[test]
+fn keys_parse_error_changes_nothing() {
+    let dir = TempDir::new("keys-error");
+    let path = dir.file("broken.bib");
+    let broken = "@misc{k, author = {Doe, Jane}, title = {unclosed\n";
+    fs::write(&path, broken).expect("write");
+    boringbib()
+        .args(["keys", "--write"])
+        .arg(&path)
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains(
+            "broken.bib:1:40: unbalanced braces",
+        ));
+    assert_eq!(fs::read_to_string(&path).expect("read"), broken);
+}
+
+#[test]
+fn keys_from_stdin_writes_to_stdout() {
+    boringbib()
+        .args(["keys", "--write", "-"])
+        .write_stdin(messy())
+        .assert()
+        .success()
+        .stdout(fixture("messy.keys.expected.bib"));
+    boringbib()
+        .args(["keys", "-"])
+        .write_stdin(messy())
+        .assert()
+        .success()
+        .stdout(expected_keys_stdout());
+}
+
+#[test]
+fn keys_reports_go_to_stderr() {
+    boringbib()
+        .args(["keys", "-"])
+        .write_stdin(
+            "@misc{k, title = {No author}}\n@misc{j, author = {Doe, Jane}, title = {No year}}\n",
+        )
+        .assert()
+        .success()
+        .stdout("j  doeno\n")
+        .stderr(
+            "<stdin>:1:1: warning: entry `k` left unchanged: no author or editor\n\
+             <stdin>:2:1: warning: entry `j` has no four-digit year; its key gets no year part\n",
+        );
+}
+
+#[test]
+fn keys_with_several_files_names_the_file() {
+    let dir = TempDir::new("keys-several");
+    let a = dir.file("a.bib");
+    let b = dir.file("b.bib");
+    fs::write(
+        &a,
+        "@misc{x, author = {Doe, Jane}, year = {2020}, title = {A}}\n",
+    )
+    .expect("write");
+    fs::write(
+        &b,
+        "@misc{y, author = {Roe, Richard}, year = {2021}, title = {B}}\n",
+    )
+    .expect("write");
+    boringbib()
+        .arg("keys")
+        .arg(&a)
+        .arg(&b)
+        .assert()
+        .success()
+        .stdout(format!(
+            "x  doe2020a  {}\ny  roe2021b  {}\n",
+            a.display(),
+            b.display()
+        ));
+}
+
+#[test]
+fn fmt_sorts_by_author() {
+    boringbib()
+        .args(["fmt", "--sort", "author", "-"])
+        .write_stdin("@misc{b, author = {Zola, Émile}}\n@misc{a, author = {van der Maaten, Laurens}}\n")
+        .assert()
+        .success()
+        .stdout("@misc{a,\n  author = {van der Maaten, Laurens}\n}\n\n@misc{b,\n  author = {Zola, Émile}\n}\n");
+}

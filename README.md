@@ -15,9 +15,9 @@ and without touching a byte you did not ask it to change:
   (`vaswani2017attention`) and updates `crossref` and friends inside the file
   so nothing dangles.
 
-> **Status:** under construction. `fmt` works (except `--wrap`,
-> `--sort-fields` and `--sort author`); `keys` is next. The command-line
-> surface below is final; see [`DESIGN.md`](DESIGN.md) for the plan.
+> **Status:** under construction. `fmt` and `keys` work; `--wrap`,
+> `--sort-fields` and the editor integration snippets are still to come.
+> See [`DESIGN.md`](DESIGN.md) for the plan.
 
 ## Install
 
@@ -101,7 +101,10 @@ networks" gives `difficulty`. Entries that share a key get suffixes `a`,
 `b`, ... in file order. `crossref`, `xref`, `related`, `ids`, `entryset`
 and `xdata` fields that point at a renamed key are updated in the same pass.
 
-`keys` never reformats; run `fmt` afterwards if you want both.
+`keys` never reformats; run `fmt` afterwards if you want both. Entries the
+algorithm cannot handle (no author or editor, a first author of `others`, an
+empty title, a field that uses a macro) are reported on stderr and left
+alone, as are references to keys that exist nowhere in the file.
 
 Suffixes depend on file order: inserting a new entry that collides with an
 existing key above it shifts the suffixes of the entries below. That is why

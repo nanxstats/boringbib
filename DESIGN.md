@@ -46,10 +46,10 @@ text ──parse()──▶ Cst ──sort::group()/sort()──▶ printer::for
 
 Dependencies, all boring: `clap` (derive) for the CLI, `anyhow` +
 `thiserror` for errors, `deunicode` for Unicode-to-ASCII transliteration,
-`serde` + `toml` for the configuration file, `similar` for `--diff`. Dev:
-`insta`, `assert_cmd`, `predicates`. No BibTeX parsing crate: the parser is
-the product. `unicode-normalization` will be added in phase 3 for the NFC
-step of key generation (see [Keys](#keys)). No `unsafe`.
+`unicode-normalization` for the NFC step of key generation, `serde` + `toml`
+for the configuration file, `similar` for `--diff`. Dev: `insta`,
+`assert_cmd`, `predicates`. No BibTeX parsing crate: the parser is the
+product. No `unsafe`.
 
 ## The tree
 
@@ -275,28 +275,56 @@ around it:
   afterwards.
 - `$...$` math is removed from titles **before** LaTeX decoding, so that an
   escaped `\$` in a title is not mistaken for a math delimiter once decoded.
-- NFC normalization uses the `unicode-normalization` crate (added in phase
-  3): accents typed as combining sequences and accents produced by the
-  decoder must transliterate identically.
-- A value that contains macro parts (`author = goossens # and # mittelbach`)
-  contributes the raw macro names, since macros are never resolved. Such
-  entries are rare and the result is reported like any other.
+- NFC normalization uses the `unicode-normalization` crate: accents typed
+  as combining sequences and accents produced by the decoder must
+  transliterate identically. The decoder emits combining marks and
+  normalizes its whole output, so `\"o`, `\"{o}`, `{\"o}`, `{\" o}` and a
+  literal `ö` are all the same string afterwards.
+- The decoder follows TeX's tokenization: a control word is the longest run
+  of letters (`\oe` is not `\o` + `e`), white space after a control word is
+  part of it (`\o rsted` is `ørsted`), and an accent's argument may be
+  preceded by white space, as any undelimited TeX argument may. An unknown
+  command without an argument is deleted but the white space after it is
+  kept, so `\LaTeX companion` still has two words. `\textendash` and the
+  other commands the brief lists are treated as unknown commands, as it
+  specifies. Two control symbols the brief does not mention are mapped to a
+  space because that is what they are: the control space `\ ` and the line
+  break `\\`.
+- An `author`, `editor` or `title` whose value uses a macro (`author =
+  goossens # and # mittelbach`) cannot be interpreted, since macros are never
+  resolved; the entry is reported and left unchanged. (A `year` macro just
+  yields no year part.) `--sort author`, which shares the name parser, uses
+  the macro names as text instead: for ordering that is harmless.
+- `$...$` and `$$...$$` are removed from titles before decoding, with `\$`
+  kept as an escape; a title with an unmatched `$` keeps its text minus the
+  `$` signs.
 - Reference fields (`crossref`, `xref`; the lists `related`, `ids`,
   `entryset`, `xdata`) are edited only when the value is a single `{...}` or
   `"..."` part; the inner text is spliced, the delimiter kept. Anything
   else (a concatenation, a macro) is reported and left alone. List entries
   are matched as whole keys, trimmed of white space.
-- Collision suffixes: entries sharing a base key are ordered by file
-  position; the first keeps the bare key, then `a`, `b`, ... `z`, `aa`, ...
-  Keys of entries that are not selected (`--only`, `[keys] keep`) and keys
-  that already equal their would-be new key count as taken. Consequence:
+- Collision suffixes: keys are assigned in file order; an entry gets its
+  base key if that is free, else the base key plus `a`, `b`, ... `z`, `aa`,
+  `ab`, ... (the first free one). Within a group of entries that share a
+  base key this is exactly "first keeps the bare key, second gets `a`".
+  Keys of entries that are not rewritten (not selected through `--only`,
+  listed in `[keys] keep`, or skipped because they have no author or title)
+  count as taken from the start; the old keys of entries that *are*
+  rewritten do not, since they are about to disappear. Consequence:
   inserting a colliding entry above an existing one shifts suffixes below
   it; `--map` records the change and the phase-5 `--rewrite` consumes it.
-- Case: keys are compared as written when checking for collisions, because
-  BibTeX treats keys case-insensitively only in the sense of matching
-  `\cite` against entries; two entries whose keys differ by case are
-  distinct entries to biber and a warning in BibTeX, and boringbib does not
-  merge them. Generated keys are always lowercase ASCII.
+- Case: taken keys and reference matching are compared case-insensitively.
+  BibTeX matches cite keys case-insensitively (and warns about "case
+  mismatch"), so a generated `smith2020foo` next to a kept `Smith2020foo`
+  would be a trap. Generated keys are always lowercase ASCII, so this only
+  matters for keys the user chose.
+- `--only` keys that match no entry are reported as warnings, not errors:
+  with several files a key is expected to exist in only one of them.
+- The mapping is printed as `old  new`, old keys padded to one column; with
+  more than one input a third column names the file. `--map` writes
+  `old<TAB>new<TAB>file` for all inputs together. With `--write -` the
+  rewritten text goes to stdout and the mapping is not printed (use
+  `--map`).
 
 ## Configuration
 
@@ -359,10 +387,12 @@ Choices made where the brief was silent, with the property they serve.
     its value; `--wrap 0` disables. (config overridable from the CLI;
     unambiguous argument parsing)
 17. Unknown configuration keys are errors. (no surprises)
-18. Key collisions count unselected and kept keys as taken; case-different
-    keys are distinct. (idempotent, matches biber)
-19. NFC via `unicode-normalization`; math stripped before decoding;
-    macro parts contribute their names. (deterministic)
+18. Key collisions count unselected, kept and skipped keys as taken,
+    compared case-insensitively; keys are assigned in file order. (idempotent,
+    no BibTeX case-mismatch traps)
+19. NFC via `unicode-normalization`; math stripped before decoding; an
+    author or title that uses a macro is reported and skipped. (deterministic,
+    no invented keys)
 20. Reference fields are edited only when they are a single string part;
     everything else is reported. (lossless)
 21. Entry types and field names are lowercased with ASCII rules; macro
@@ -373,6 +403,13 @@ Choices made where the brief was silent, with the property they serve.
     surprises, BibTeX-faithful)
 23. `--check` reports to stdout, `--diff` uses `a/` and `b/` headers, and
     already-formatted files are silent. (composable with shell tooling)
+24. The LaTeX decoder follows TeX tokenization (longest control word, white
+    space after control words consumed, white space before accent arguments
+    skipped); unknown commands are deleted but keep the white space after
+    them; `\ ` and `\\` become a space. (deterministic; words stay apart)
+25. `keys` prints `old  new` columns (plus the file with several inputs),
+    reports go to stderr as warnings, and a missing `--only` key is a
+    warning. (composable; multi-file friendly)
 
 ## What was borrowed, and from where
 

@@ -19,7 +19,7 @@ use clap::{Args, Parser, Subcommand};
 
 use crate::config::{self, Config, FmtConfig, KeysConfig};
 use crate::cst::Cst;
-use crate::keys::{KeysOptions, Style};
+use crate::keys::{self, KeysOptions, Style};
 use crate::printer::{FmtOptions, Indent, LineEnding, Quotes, SortFields};
 use crate::sort::SortKey;
 use crate::{Error, format, parse};
@@ -189,8 +189,8 @@ fn try_run(cli: &Cli) -> anyhow::Result<u8> {
             run_fmt(args, &options)
         }
         Command::Keys(args) => {
-            let _options = resolve_keys(args, &config.keys);
-            bail!("`keys` is not implemented yet (phase 3 of the work plan)")
+            let options = resolve_keys(args, &config.keys);
+            run_keys(args, &options)
         }
     }
 }
@@ -235,11 +235,6 @@ fn inputs(files: &[PathBuf]) -> anyhow::Result<Vec<Input>> {
 /// Runs `fmt` over every input. Inputs are independent: an error in one is
 /// reported and the others are still processed.
 fn run_fmt(args: &FmtArgs, options: &FmtOptions) -> anyhow::Result<u8> {
-    if options.sort == SortKey::Author {
-        // The author ordering needs the key generator's name parsing, which
-        // is phase 3 of the work plan.
-        bail!("`--sort author` is not available yet (phase 3 of the work plan)");
-    }
     let mut failed = false;
     let mut changed = false;
     for input in inputs(&args.files)? {
@@ -299,6 +294,103 @@ fn fmt_one(input: &Input, args: &FmtArgs, options: &FmtOptions) -> Result<bool, 
         }
     }
     Ok(changed)
+}
+
+/// Runs `keys` over every input. Inputs are independent; the mapping file,
+/// if requested, collects the renames of all of them.
+fn run_keys(args: &KeysArgs, options: &KeysOptions) -> anyhow::Result<u8> {
+    let inputs = inputs(&args.files)?;
+    let several = inputs.len() > 1;
+    let mut failed = false;
+    let mut map = String::new();
+    for input in &inputs {
+        if let Err(err) = keys_one(input, args, options, several, &mut map) {
+            eprintln!("boringbib: error: {err}");
+            failed = true;
+        }
+    }
+    if let Some(path) = &args.map {
+        if let Err(error) = fs::write(path, &map) {
+            let err = Error::Io {
+                path: path.display().to_string(),
+                error,
+            };
+            eprintln!("boringbib: error: {err}");
+            failed = true;
+        }
+    }
+    Ok(if failed { EXIT_ERROR } else { EXIT_OK })
+}
+
+/// Plans and (with `--write`) applies the key changes of one input, prints
+/// the mapping, and appends `old<TAB>new<TAB>file` lines to `map`.
+fn keys_one(
+    input: &Input,
+    args: &KeysArgs,
+    options: &KeysOptions,
+    several: bool,
+    map: &mut String,
+) -> Result<(), Error> {
+    use std::fmt::Write as _;
+
+    let name = input.name();
+    let text = read_input(input)?;
+    let cst = parse(&text).map_err(|error| Error::Parse {
+        path: name.clone(),
+        error,
+    })?;
+    report_warnings(&name, &cst);
+    let plan = keys::plan(&cst, options);
+    for report in &plan.reports {
+        let (line, col) = cst.line_col(report.offset);
+        eprintln!("{name}:{line}:{col}: warning: {}", report.message);
+    }
+    for rename in &plan.renames {
+        let _ = writeln!(map, "{}\t{}\t{name}", rename.old, rename.new);
+    }
+
+    let mut stdout = io::stdout().lock();
+    let stdout_error = |error| Error::Io {
+        path: "<stdout>".to_owned(),
+        error,
+    };
+    if args.write {
+        match input {
+            Input::Stdin => {
+                let output = keys::apply(&cst, &plan);
+                return stdout.write_all(output.as_bytes()).map_err(stdout_error);
+            }
+            Input::File(path) => {
+                if !plan.edits.is_empty() {
+                    let output = keys::apply(&cst, &plan);
+                    write_atomically(path, &output).map_err(|error| Error::Io {
+                        path: name.clone(),
+                        error,
+                    })?;
+                }
+            }
+        }
+    }
+    print_mapping(&mut stdout, &plan, several.then_some(name.as_str())).map_err(stdout_error)
+}
+
+/// Prints `old  new` lines, the old keys padded to a column; with `file`,
+/// a third column names the file.
+fn print_mapping(out: &mut impl Write, plan: &keys::Plan, file: Option<&str>) -> io::Result<()> {
+    let width = plan
+        .renames
+        .iter()
+        .map(|rename| rename.old.chars().count())
+        .max()
+        .unwrap_or(0);
+    for rename in &plan.renames {
+        write!(out, "{:<width$}  {}", rename.old, rename.new)?;
+        if let Some(file) = file {
+            write!(out, "  {file}")?;
+        }
+        writeln!(out)?;
+    }
+    Ok(())
 }
 
 /// Reads an input as UTF-8 text. The byte-order mark, if any, is left in
