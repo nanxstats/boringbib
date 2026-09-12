@@ -1,0 +1,16 @@
+---
+source: tests/fmt.rs
+expression: visible(&output)
+---
+@misc{,
+  title = {Entry with an empty key}
+}
+
+@misc{
+}
+
+@misc{k
+}
+
+@misc{k2
+}

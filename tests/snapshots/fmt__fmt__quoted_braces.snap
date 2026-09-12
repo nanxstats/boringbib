@@ -1,0 +1,10 @@
+---
+source: tests/fmt.rs
+expression: visible(&output)
+---
+@article{quotes,
+  title   = {A {"}quoted{"} title with {braces} and a {\"u}mlaut},
+  journal = {Journal of {Things}},
+  note    = {Just text},
+  pages   = {1--2}
+}

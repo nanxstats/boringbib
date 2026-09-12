@@ -9,6 +9,8 @@
 //! Exit status: 0 on success, 1 when `fmt --check` found a file that would
 //! change, 2 on any error (syntax, I/O, invalid arguments).
 
+use std::fs;
+use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -16,9 +18,11 @@ use anyhow::{Context, bail};
 use clap::{Args, Parser, Subcommand};
 
 use crate::config::{self, Config, FmtConfig, KeysConfig};
+use crate::cst::Cst;
 use crate::keys::{KeysOptions, Style};
 use crate::printer::{FmtOptions, Indent, LineEnding, Quotes, SortFields};
 use crate::sort::SortKey;
+use crate::{Error, format, parse};
 
 /// Exit status for success.
 pub const EXIT_OK: u8 = 0;
@@ -181,14 +185,204 @@ fn try_run(cli: &Cli) -> anyhow::Result<u8> {
     let config = load_config(cli.config.as_deref())?;
     match &cli.command {
         Command::Fmt(args) => {
-            let _options = resolve_fmt(args, &config.fmt);
-            bail!("`fmt` is not implemented yet (phase 2 of the work plan)")
+            let options = resolve_fmt(args, &config.fmt);
+            run_fmt(args, &options)
         }
         Command::Keys(args) => {
             let _options = resolve_keys(args, &config.keys);
             bail!("`keys` is not implemented yet (phase 3 of the work plan)")
         }
     }
+}
+
+/// Where a file's text comes from.
+enum Input {
+    Stdin,
+    File(PathBuf),
+}
+
+impl Input {
+    /// The name used in messages.
+    fn name(&self) -> String {
+        match self {
+            Self::Stdin => "<stdin>".to_owned(),
+            Self::File(path) => path.display().to_string(),
+        }
+    }
+}
+
+/// Turns the `FILES` argument into inputs: `-` is stdin, and no files at all
+/// means stdin when it is not a terminal.
+fn inputs(files: &[PathBuf]) -> anyhow::Result<Vec<Input>> {
+    if files.is_empty() {
+        if io::stdin().is_terminal() {
+            bail!("no input files (pass `-` to read from stdin)");
+        }
+        return Ok(vec![Input::Stdin]);
+    }
+    Ok(files
+        .iter()
+        .map(|path| {
+            if path.as_os_str() == "-" {
+                Input::Stdin
+            } else {
+                Input::File(path.clone())
+            }
+        })
+        .collect())
+}
+
+/// Runs `fmt` over every input. Inputs are independent: an error in one is
+/// reported and the others are still processed.
+fn run_fmt(args: &FmtArgs, options: &FmtOptions) -> anyhow::Result<u8> {
+    if options.sort == SortKey::Author {
+        // The author ordering needs the key generator's name parsing, which
+        // is phase 3 of the work plan.
+        bail!("`--sort author` is not available yet (phase 3 of the work plan)");
+    }
+    let mut failed = false;
+    let mut changed = false;
+    for input in inputs(&args.files)? {
+        match fmt_one(&input, args, options) {
+            Ok(this_changed) => changed |= this_changed,
+            Err(err) => {
+                eprintln!("boringbib: error: {err}");
+                failed = true;
+            }
+        }
+    }
+    Ok(if failed {
+        EXIT_ERROR
+    } else if changed && args.check {
+        EXIT_CHANGED
+    } else {
+        EXIT_OK
+    })
+}
+
+/// Formats one input. Returns whether the output differs from the input.
+fn fmt_one(input: &Input, args: &FmtArgs, options: &FmtOptions) -> Result<bool, Error> {
+    let name = input.name();
+    let text = read_input(input)?;
+    let cst = parse(&text).map_err(|error| Error::Parse {
+        path: name.clone(),
+        error,
+    })?;
+    report_warnings(&name, &cst);
+    let output = format(&cst, options);
+    let changed = output != text;
+
+    let mut stdout = io::stdout().lock();
+    let stdout_error = |error| Error::Io {
+        path: "<stdout>".to_owned(),
+        error,
+    };
+    if args.check {
+        if changed {
+            writeln!(stdout, "would reformat {name}").map_err(stdout_error)?;
+        }
+    } else if args.diff {
+        if changed {
+            write!(stdout, "{}", unified_diff(&name, &text, &output)).map_err(stdout_error)?;
+        }
+    } else {
+        match input {
+            Input::Stdin => stdout.write_all(output.as_bytes()).map_err(stdout_error)?,
+            Input::File(path) => {
+                if changed {
+                    write_atomically(path, &output).map_err(|error| Error::Io {
+                        path: name.clone(),
+                        error,
+                    })?;
+                }
+            }
+        }
+    }
+    Ok(changed)
+}
+
+/// Reads an input as UTF-8 text. The byte-order mark, if any, is left in
+/// place for the parser to record.
+fn read_input(input: &Input) -> Result<String, Error> {
+    let name = input.name();
+    let bytes = match input {
+        Input::Stdin => {
+            let mut bytes = Vec::new();
+            io::stdin()
+                .lock()
+                .read_to_end(&mut bytes)
+                .map_err(|error| Error::Io {
+                    path: name.clone(),
+                    error,
+                })?;
+            bytes
+        }
+        Input::File(path) => fs::read(path).map_err(|error| Error::Io {
+            path: name.clone(),
+            error,
+        })?,
+    };
+    String::from_utf8(bytes).map_err(|error| Error::Utf8 {
+        path: name,
+        offset: error.utf8_error().valid_up_to(),
+    })
+}
+
+/// Prints the parser's warnings as `file:line:col: warning: message`.
+fn report_warnings(name: &str, cst: &Cst) {
+    for warning in cst.warnings() {
+        let (line, col) = cst.line_col(warning.offset);
+        eprintln!("{name}:{line}:{col}: warning: {}", warning.message);
+    }
+}
+
+/// A unified diff with `a/` and `b/` headers, like `git diff`.
+fn unified_diff(name: &str, old: &str, new: &str) -> String {
+    similar::TextDiff::from_lines(old, new)
+        .unified_diff()
+        .context_radius(3)
+        .header(&format!("a/{name}"), &format!("b/{name}"))
+        .to_string()
+}
+
+/// Replaces the file at `path` with `content` by writing a temporary file in
+/// the same directory and renaming it over the original, so that a crash can
+/// never leave a half-written file. Symbolic links are followed and the
+/// original's permissions are kept.
+fn write_atomically(path: &Path, content: &str) -> io::Result<()> {
+    let target = fs::canonicalize(path)?;
+    let dir = target
+        .parent()
+        .ok_or_else(|| io::Error::other("path has no parent directory"))?;
+    let file_name = target
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("file");
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos());
+    let temp = dir.join(format!(
+        ".{file_name}.{}-{unique}.boringbib-tmp",
+        std::process::id()
+    ));
+    let write = || -> io::Result<()> {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp)?;
+        file.write_all(content.as_bytes())?;
+        file.sync_all()?;
+        drop(file);
+        if let Ok(metadata) = fs::metadata(&target) {
+            fs::set_permissions(&temp, metadata.permissions())?;
+        }
+        fs::rename(&temp, &target)
+    };
+    let result = write();
+    if result.is_err() {
+        let _ = fs::remove_file(&temp);
+    }
+    result
 }
 
 /// Loads the configuration: the explicit file if given (it must exist),

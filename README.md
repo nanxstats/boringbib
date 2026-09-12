@@ -15,8 +15,9 @@ and without touching a byte you did not ask it to change:
   (`vaswani2017attention`) and updates `crossref` and friends inside the file
   so nothing dangles.
 
-> **Status:** under construction. The command-line surface below is final;
-> the implementation lands in phases (see [`DESIGN.md`](DESIGN.md)).
+> **Status:** under construction. `fmt` works (except `--wrap`,
+> `--sort-fields` and `--sort author`); `keys` is next. The command-line
+> surface below is final; see [`DESIGN.md`](DESIGN.md) for the plan.
 
 ## Install
 

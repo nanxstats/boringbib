@@ -167,6 +167,16 @@ impl Cst {
         })
     }
 
+    /// The raw text of a value: the parts' contents concatenated, without
+    /// delimiters. Macros are not resolved; they contribute their name.
+    pub fn value_text(&self, value: &Value) -> String {
+        value
+            .parts
+            .iter()
+            .map(|part| self.text(part.inner()))
+            .collect()
+    }
+
     /// Returns the source with each span replaced by the paired text.
     ///
     /// This is the primitive behind every targeted edit: the result contains
@@ -493,6 +503,7 @@ mod tests {
         let entry = cst.entries().next().expect("one entry");
         let found = entry.field(&cst, "TITLE").expect("found");
         assert_eq!(cst.text(found.value.parts[0].inner()), "A");
+        assert_eq!(cst.value_text(&found.value), "A");
         assert!(entry.field(&cst, "author").is_none());
         assert_eq!(cst.text(entry.key), "k");
         assert!(!cst.blocks()[0].is_trivia());

@@ -1,0 +1,11 @@
+---
+source: tests/fmt.rs
+expression: visible(&output)
+---
+@article{ws,
+  title   = {Tabs and newlines},
+  author  = {Doe, Jane},
+  journal = {Nature},
+  year    = 2020,
+  pages   = {1 -- 2}
+}

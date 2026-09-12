@@ -1,0 +1,25 @@
+---
+source: tests/fmt.rs
+expression: visible(&output)
+---
+@inproceedings{paper,
+  author   = {Doe, Jane},
+  title    = {A paper in a proceedings},
+  crossref = {proc},
+  pages    = {1--10}
+}
+
+@proceedings{proc,
+  editor    = {Roe, Richard},
+  title     = {Proceedings of the Conference},
+  booktitle = {Proceedings of the Conference},
+  year      = {2020}
+}
+
+@misc{related,
+  author  = {Poe, Edgar},
+  title   = {Something related},
+  year    = {2020},
+  related = {paper, proc},
+  xref    = {proc}
+}

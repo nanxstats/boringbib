@@ -1,0 +1,22 @@
+---
+source: tests/fmt.rs
+expression: visible(&output)
+---
+@string{jmlr = {Journal of Machine Learning Research}}
+
+@preamble{"\providecommand{\noopsort}[1]{}"}
+
+@comment{This comment uses parentheses}
+@article{knuth1984,
+  author  = {Knuth, Donald E.},
+  title   = {Literate programming},
+  journal = {The Computer Journal},
+  year    = 1984
+}
+
+@book{lamport1994,
+  author    = {Lamport, Leslie},
+  title     = {{\LaTeX}: a document preparation system},
+  publisher = {Addison-Wesley},
+  year      = {1994}
+}

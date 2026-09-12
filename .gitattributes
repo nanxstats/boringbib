@@ -1,0 +1,3 @@
+# Fixtures and snapshots are byte-exact test data: never convert their line endings.
+tests/fixtures/** -text
+tests/snapshots/** -text

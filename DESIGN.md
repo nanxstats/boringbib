@@ -113,7 +113,9 @@ Relaxations, none of which can lose data:
   since it is usually a broken entry; BibTeX itself would stop with an error.
 - **Identifiers** may start with a digit and may contain non-ASCII
   characters. BibTeX would reject `3d = {...}`; boringbib prints it back
-  unchanged, which is not its job to police.
+  unchanged, which is not its job to police. Note that `[`, `]`, `@`, `:`
+  and most other punctuation are identifier characters (as in BibTeX), so
+  `title = [x]` is a macro named `[x]`, not a syntax error.
 - **Keys** may be empty (`@misc{, title = ...}`), as in BibTeX.
 - **Duplicate field names** in one entry are kept, both of them, with a
   warning. BibTeX uses the first; `Entry::field` returns the first.
@@ -128,12 +130,17 @@ under the junk rule, which matches BibTeX exactly.
 Errors stop at the first problem and are reported as `line:col: message`
 (the CLI prefixes the file name); line and column are 1-based and the
 column counts characters, not bytes. An unclosed `{`, `(` or `"` is reported
-at its opening character, since that is where the fix goes. Messages:
-`unbalanced braces: this \`{\` is never closed`, `unterminated quoted
-string`, `expected \`=\` after field name`, `expected \`,\` or \`}\``,
-`expected a value ({...}, "...", a number or a macro name)`, `unbalanced
-parentheses`. Warnings go to stderr as `file:line:col: warning: message` and
-never change the exit status.
+at its opening character, since that is where the fix goes; every other
+error is reported where the unexpected character is and says what was found
+(`expected \`,\` or \`}\`, found \`y\``, `..., found end of file`). The
+messages are: `unbalanced braces: this \`{\` is never closed`, `unbalanced
+braces: unexpected \`}\` inside a quoted string`, `unterminated quoted
+string`, `unbalanced parentheses: this \`(\` is never closed`, `expected
+\`=\` after field name \`x\``, `expected \`=\` after macro name \`x\``,
+`expected \`,\` or \`}\``, `expected a field name`, `expected a macro
+name`, `expected a value (\`{...}\`, \`"..."\`, a number or a macro name)`,
+`expected \`}\``. Warnings go to stderr as `file:line:col: warning: message`
+and never change the exit status.
 
 ## Formatting
 
@@ -143,8 +150,12 @@ defaults matching LaTeX Workshop's formatter with `align-equal` and sorting
 on:
 
 - Block names, entry types and field names in lowercase; keys untouched.
-  All blocks use braces, even if written with parentheses; there is no white
-  space between `@name` and `{`.
+  Lowercasing is ASCII-only, exactly the case folding BibTeX applies to
+  identifiers; a non-ASCII letter in a field name is left as written. Macro
+  names (`@string{JMLR = ...}`, `journal = JMLR`) keep their case too: BibTeX
+  matches them case-insensitively, and the brief asks for lowercase entry
+  types and field names, nothing else. All blocks use braces, even if
+  written with parentheses; there is no white space between `@name` and `{`.
 - Entry: `@type{key,` on one line; one field per line, indented (`--indent`,
   default two spaces); ` = ` between the field name (padded to the longest
   field name **in that entry** when `--align` is on) and the value; `,` after
@@ -241,7 +252,11 @@ others are still processed; the exit status is 2 if any failed, else 1 if
 
 `fmt -` reads stdin and writes stdout; so does `fmt` with no files when
 stdin is not a terminal. `--check` and `--diff` work on stdin too, reporting
-the file as `<stdin>`.
+the file as `<stdin>`. `--check` prints `would reformat FILE` to stdout for
+each file that differs (the list is the result, so it is not stderr);
+`--diff` prints a unified diff with `a/FILE` and `b/FILE` headers so that
+`patch -p1` applies it. Warnings are printed even in these modes. A file
+that is already formatted produces no output at all.
 
 ## Keys
 
@@ -350,6 +365,14 @@ Choices made where the brief was silent, with the property they serve.
     macro parts contribute their names. (deterministic)
 20. Reference fields are edited only when they are a single string part;
     everything else is reported. (lossless)
+21. Entry types and field names are lowercased with ASCII rules; macro
+    names are never lowercased. (matches BibTeX's own folding; lossless
+    where the brief does not ask for a change)
+22. Errors name what was found; unclosed delimiters point at the opener;
+    `[` and friends are identifier characters, so `[x]` is a macro. (no
+    surprises, BibTeX-faithful)
+23. `--check` reports to stdout, `--diff` uses `a/` and `b/` headers, and
+    already-formatted files are silent. (composable with shell tooling)
 
 ## What was borrowed, and from where
 

@@ -1,0 +1,23 @@
+---
+source: tests/fmt.rs
+expression: visible(&output)
+---
+@string{jan = {January}}
+
+@string{AW = {Addison-Wesley}}
+
+@string{and = {and}}
+
+@string{goossens = {Goossens, Michel}}
+
+@string{mittelbach = {Mittelbach, Frank}}
+
+@book{companion,
+  author    = goossens # and # mittelbach,
+  title     = {The {{\LaTeX}} {C}ompanion},
+  publisher = AW,
+  year      = 1993,
+  month     = jan,
+  note      = {First } # {edition} # {, revised},
+  edition   = {2nd } # {printing}
+}

@@ -1,0 +1,19 @@
+---
+source: tests/fmt.rs
+expression: visible(&output)
+---
+@misc{a.b_c-d+e,
+  title = {Key with punctuation}
+}
+
+@misc{key#hash,
+  title = {Key with a hash sign}
+}
+
+@misc{Knuth:1984/TeX,
+  title = {Key with colon and slash}
+}
+
+@misc{spaced,
+  title = {Key surrounded by spaces}
+}

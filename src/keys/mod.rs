@@ -36,7 +36,8 @@ pub mod stopwords;
 
 use serde::Deserialize;
 
-use crate::cst::{Cst, Span};
+use crate::cst::{Cst, Entry, Span};
+use crate::lexer;
 
 /// Fields that hold a single citation key.
 pub const REFERENCE_FIELDS_SINGLE: &[&str] = &["crossref", "xref"];
@@ -157,8 +158,41 @@ pub fn author_part(_names: &str) -> Option<String> {
 
 /// The year part: the first 4-digit number in `year`, else in `date`, else
 /// empty.
-pub fn year_part(_year: Option<&str>, _date: Option<&str>) -> String {
-    todo!("phase 3: year part")
+pub fn year_part(year: Option<&str>, date: Option<&str>) -> String {
+    year.and_then(first_four_digit_number)
+        .or_else(|| date.and_then(first_four_digit_number))
+        .map(str::to_owned)
+        .unwrap_or_default()
+}
+
+/// The first maximal run of exactly four ASCII digits in `text`.
+pub fn first_four_digit_number(text: &str) -> Option<&str> {
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if !bytes[i].is_ascii_digit() {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+        if i - start == 4 {
+            return Some(&text[start..i]);
+        }
+    }
+    None
+}
+
+/// The text of the entry's `author` field, or of `editor` if `author` is
+/// absent or blank; `None` if neither is usable.
+pub fn names_field(cst: &Cst, entry: &Entry) -> Option<String> {
+    ["author", "editor"].iter().find_map(|name| {
+        let field = entry.field(cst, name)?;
+        let text = cst.value_text(&field.value);
+        (!text.chars().all(lexer::is_whitespace)).then_some(text)
+    })
 }
 
 /// The title part: the first title word that is not a stop word.
@@ -203,6 +237,31 @@ mod tests {
             ..KeysOptions::default()
         };
         assert_eq!(options.effective_stop_words(), ["a", "towards"]);
+    }
+
+    #[test]
+    fn year_part_takes_the_first_four_digit_run() {
+        assert_eq!(year_part(Some("2017"), None), "2017");
+        assert_eq!(year_part(Some("c. 1850"), None), "1850");
+        assert_eq!(year_part(Some("12345 then 1999"), None), "1999");
+        assert_eq!(year_part(Some("n.d."), Some("2021-03-04")), "2021");
+        assert_eq!(year_part(None, Some("2021-03-04")), "2021");
+        assert_eq!(year_part(None, None), "");
+        assert_eq!(first_four_digit_number("99 999 9999 99999"), Some("9999"));
+        assert_eq!(first_four_digit_number(""), None);
+    }
+
+    #[test]
+    fn names_field_prefers_author_then_editor() {
+        let cst = crate::parse(
+            "@misc{a, author = {A}, editor = {E}}@misc{b, author = { }, editor = {E}}@misc{c, editor = {}}@misc{d}",
+        )
+        .expect("parses");
+        let names: Vec<Option<String>> = cst.entries().map(|e| names_field(&cst, e)).collect();
+        assert_eq!(
+            names,
+            [Some("A".to_owned()), Some("E".to_owned()), None, None]
+        );
     }
 
     #[test]

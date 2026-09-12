@@ -1,0 +1,9 @@
+---
+source: tests/fmt.rs
+expression: visible(&output)
+---
+@article{crlf,<CR>
+  title  = {A title that spans two lines},<CR>
+  author = {One and Two},<CR>
+  year   = {2020}<CR>
+}<CR>

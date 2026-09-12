@@ -1,0 +1,15 @@
+---
+source: tests/fmt.rs
+expression: visible(&output)
+---
+@article{onlyothers,
+  author = {others},
+  title  = {Nobody in particular},
+  year   = {2017}
+}
+
+@article{others,
+  author = {Vaswani, Ashish and Shazeer, Noam and others},
+  title  = {Attention is all you need},
+  year   = {2017}
+}
