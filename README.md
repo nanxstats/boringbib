@@ -15,10 +15,6 @@ and without touching a byte you did not ask it to change:
   (`vaswani2017attention`) and updates `crossref` and friends inside the file
   so nothing dangles.
 
-> **Status:** under construction. `fmt` and `keys` work; `--wrap`,
-> `--sort-fields` and the editor integration snippets are still to come.
-> See [`DESIGN.md`](DESIGN.md) for the plan.
-
 ## Install
 
 With Homebrew:
@@ -83,6 +79,20 @@ separates blocks. Comments and `%` lines between entries move together with
 the entry they precede. Everything else (macros, numbers, `@preamble` and
 `@comment` bodies, nested braces) is printed as written.
 
+Two options go beyond LaTeX Workshop:
+
+- `--wrap 80` word-wraps values so that no line is longer than 80 columns,
+  the trailing comma included. Continuation lines are aligned under the
+  first character of the value, words are never split, and only whole
+  spaces are used as break points, so the file means the same to BibTeX.
+- `--sort-fields` reorders the fields of each entry into `author, editor,
+  title, booktitle, journal, year, month, volume, number, pages, publisher,
+  address, edition, series, chapter, howpublished, institution,
+  organization, school, type, note, doi, url, urldate, isbn, issn, eprint,
+  archiveprefix, primaryclass, keywords, abstract, file`, followed by any
+  other fields alphabetically. `--sort-fields=doi,url` puts those two first
+  and keeps the rest of the built-in order.
+
 ## Rewrite keys
 
 ```console
@@ -119,25 +129,53 @@ Keys are named like the long flags, with underscores. Command-line flags win.
 
 ```toml
 [fmt]
-sort = "key"
-indent = 2
+sort = "key"            # key | none | year | type | author
+indent = 2              # or "tab"
 align = true
-quotes = "braces"
+quotes = "braces"       # braces | keep
 trailing_comma = false
-sort_fields = false
-line_ending = "auto"
+wrap = 80               # 0 or absent: no wrapping
+sort_fields = false     # true for the built-in order, or ["author", "title"]
+line_ending = "auto"    # auto | lf | crlf
+keep_bom = false
 
 [keys]
 style = "scholar"
-stop_words_extra = ["towards"]
-keep = ["knuth1984"]
+stop_words_extra = ["towards"]   # extends the built-in stop words
+keep = ["knuth1984"]             # never rewritten
 ```
 
-## Editor integration
+Unknown keys are errors, so a typo cannot silently do nothing. Every
+boolean flag has a `--no-` twin (`--no-align`, `--no-wrap`, ...) so that a
+file setting can be overridden either way from the command line.
 
-Copy-paste snippets for a `pre-commit` hook, a VS Code task, a Neovim
-`conform.nvim` formatter entry, and a private VS Code extension
-(`docs/vscode-extension.md`) are part of a later phase.
+## pre-commit hook
+
+`boringbib` has no `pre-commit` repository of its own; a local hook that
+calls the installed binary is all it takes. Add this to
+`.pre-commit-config.yaml`:
+
+```yaml
+repos:
+  - repo: local
+    hooks:
+      - id: boringbib
+        name: boringbib fmt
+        entry: boringbib fmt
+        language: system
+        files: \.bib$
+```
+
+The hook rewrites the staged `.bib` files in place and fails the commit if
+it changed anything, so you can review and re-stage. Use `entry: boringbib
+fmt --check` instead if you prefer a hook that only complains.
+
+## Editors
+
+Any editor that can pipe a buffer through a command can use `boringbib fmt
+-`: it reads the file from stdin and prints the formatted file to stdout,
+exits 2 and prints `line:col: message` on a syntax error, and picks up
+`boringbib.toml` from the working directory.
 
 ## Exit codes
 

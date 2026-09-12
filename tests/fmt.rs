@@ -5,7 +5,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use boringbib::printer::{Indent, LineEnding, Quotes};
+use boringbib::printer::{Indent, LineEnding, Quotes, SortFields};
 use boringbib::sort::SortKey;
 use boringbib::{FmtOptions, format_str, parse};
 
@@ -85,7 +85,41 @@ fn option_sets() -> Vec<(&'static str, FmtOptions)> {
                 ..FmtOptions::default()
             },
         ),
+        (
+            "wrap 60, sort fields",
+            FmtOptions {
+                wrap: Some(60),
+                sort_fields: SortFields::Default,
+                ..FmtOptions::default()
+            },
+        ),
+        (
+            "wrap 24, no align, tab, custom field order, trailing comma",
+            FmtOptions {
+                wrap: Some(24),
+                align: false,
+                indent: Indent::Tab,
+                sort_fields: SortFields::from_list("year,title"),
+                trailing_comma: true,
+                ..FmtOptions::default()
+            },
+        ),
     ]
+}
+
+#[test]
+fn appendix_a_wrapped_and_field_sorted_snapshot() {
+    let input = read(&fixtures_dir().join("messy.bib"));
+    let options = FmtOptions {
+        wrap: Some(80),
+        sort_fields: SortFields::Default,
+        ..FmtOptions::default()
+    };
+    let output = format_str(&input, &options).expect("messy.bib parses");
+    for line in output.lines() {
+        assert!(line.chars().count() <= 80, "{line:?}");
+    }
+    insta::assert_snapshot!("fmt__messy_wrap80_sort_fields", visible(&output));
 }
 
 #[test]
@@ -127,19 +161,23 @@ fn parsing_is_lossless_for_every_fixture() {
 
 #[test]
 fn formatted_output_parses_to_the_same_entries() {
+    /// Entries as (type, key, sorted field names): the order of fields is
+    /// not part of the shape, since `--sort-fields` may change it.
     fn shape(text: &str) -> Vec<(String, String, Vec<String>)> {
         let cst = parse(text).expect("parses");
         let mut shape: Vec<_> = cst
             .entries()
             .map(|entry| {
+                let mut names: Vec<String> = entry
+                    .fields
+                    .iter()
+                    .map(|field| cst.text(field.name).to_ascii_lowercase())
+                    .collect();
+                names.sort();
                 (
                     cst.text(entry.kind).to_ascii_lowercase(),
                     cst.text(entry.key).to_owned(),
-                    entry
-                        .fields
-                        .iter()
-                        .map(|field| cst.text(field.name).to_ascii_lowercase())
-                        .collect(),
+                    names,
                 )
             })
             .collect();

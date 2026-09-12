@@ -526,3 +526,37 @@ fn fmt_sorts_by_author() {
         .success()
         .stdout("@misc{a,\n  author = {van der Maaten, Laurens}\n}\n\n@misc{b,\n  author = {Zola, Émile}\n}\n");
 }
+
+#[test]
+fn wrap_and_sort_fields_from_config_and_flags() {
+    let dir = TempDir::new("wrap-config");
+    fs::write(
+        dir.file("boringbib.toml"),
+        "[fmt]\nwrap = 30\nsort_fields = [\"year\"]\n",
+    )
+    .expect("write");
+    let input = "@misc{k, title = {one two three four five six}, year = {2020}}\n";
+    boringbib()
+        .current_dir(&dir.0)
+        .args(["fmt", "-"])
+        .write_stdin(input)
+        .assert()
+        .success()
+        .stdout(
+            "@misc{k,\n  year  = {2020},\n  title = {one two three four\n           five six}\n}\n",
+        );
+    boringbib()
+        .current_dir(&dir.0)
+        .args(["fmt", "--no-wrap", "--no-sort-fields", "-"])
+        .write_stdin(input)
+        .assert()
+        .success()
+        .stdout("@misc{k,\n  title = {one two three four five six},\n  year  = {2020}\n}\n");
+    boringbib()
+        .current_dir(&dir.0)
+        .args(["fmt", "--wrap", "0", "--sort-fields", "-"])
+        .write_stdin(input)
+        .assert()
+        .success()
+        .stdout("@misc{k,\n  title = {one two three four five six},\n  year  = {2020}\n}\n");
+}

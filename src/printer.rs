@@ -412,22 +412,131 @@ fn print_entry(cst: &Cst, entry: &Entry, options: &FmtOptions, out: &mut String)
         0
     };
     let indent = options.indent.as_string();
-    let last = entry.fields.len() - 1;
+    let indent_columns = indent.chars().count();
+    let order = field_order(&names, &options.sort_fields);
+    let last = order.len() - 1;
     out.push_str(",\n");
-    for (i, (field, name)) in entry.fields.iter().zip(&names).enumerate() {
+    for (position, &index) in order.iter().enumerate() {
+        let field = &entry.fields[index];
+        let name = &names[index];
+        let name_columns = name.chars().count();
+        let padding = width.saturating_sub(name_columns);
+        let punctuation = if position < last || options.trailing_comma {
+            ","
+        } else {
+            ""
+        };
+        let value = format!(
+            "{}{punctuation}",
+            format_value(cst, &field.value, options.quotes)
+        );
         out.push_str(&indent);
         out.push_str(name);
-        for _ in name.chars().count()..width {
-            out.push(' ');
-        }
+        out.extend(std::iter::repeat_n(' ', padding));
         out.push_str(" = ");
-        out.push_str(&format_value(cst, &field.value, options.quotes));
-        if i < last || options.trailing_comma {
-            out.push(',');
+        match options.wrap {
+            None => {
+                out.push_str(&value);
+                out.push('\n');
+            }
+            Some(columns) => {
+                // The value starts after `indent name padding = `; continuation
+                // lines align under its first character, one past the delimiter.
+                let prefix_columns = indent_columns + name_columns + padding + 3;
+                let continuation_columns = prefix_columns + 1;
+                let lines = wrap_value(
+                    &value,
+                    columns.saturating_sub(prefix_columns),
+                    columns.saturating_sub(continuation_columns),
+                );
+                let mut lines = lines.into_iter();
+                out.push_str(&lines.next().unwrap_or_default());
+                out.push('\n');
+                for line in lines {
+                    out.push_str(&indent);
+                    out.extend(std::iter::repeat_n(' ', name_columns + padding + 4));
+                    out.push_str(&line);
+                    out.push('\n');
+                }
+            }
         }
-        out.push('\n');
     }
     out.push_str("}\n");
+}
+
+/// The order in which to print the fields, as indices. With sorting on,
+/// fields in the configured order come first in that order, then the rest
+/// alphabetically; the sort is stable, so duplicated fields keep their
+/// relative order.
+fn field_order(names: &[String], sort_fields: &SortFields) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..names.len()).collect();
+    if let Some(configured) = sort_fields.order() {
+        order.sort_by_cached_key(|&index| {
+            let name = &names[index];
+            match configured.iter().position(|o| o == name) {
+                Some(rank) => (0, rank, String::new()),
+                None => (1, 0, name.clone()),
+            }
+        });
+    }
+    order
+}
+
+/// Greedy word wrap of a value (with its trailing punctuation): the first
+/// line holds at most `first_budget` characters, the others at most
+/// `continuation_budget`. A word that does not fit gets a line of its own;
+/// nothing is ever split inside a word.
+fn wrap_value(text: &str, first_budget: usize, continuation_budget: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    let mut budget = first_budget;
+    for word in breakable_words(text) {
+        if current.is_empty() {
+            current.push_str(word);
+        } else if current.chars().count() + 1 + word.chars().count() <= budget {
+            current.push(' ');
+            current.push_str(word);
+        } else {
+            lines.push(std::mem::take(&mut current));
+            current.push_str(word);
+            budget = continuation_budget;
+        }
+    }
+    lines.push(current);
+    lines
+}
+
+/// Splits a value at the spaces where a line may break: every space except
+/// one right after the opening delimiter of a part or right before its
+/// closing delimiter, so that `{First }` keeps its trailing space on the
+/// same line as the brace. A `"` toggles a quoted part only at brace depth
+/// 0, exactly as the parser reads it.
+fn breakable_words(text: &str) -> Vec<&str> {
+    let bytes = text.as_bytes();
+    let mut words = Vec::new();
+    let mut start = 0;
+    let mut depth = 0usize;
+    let mut in_quote = false;
+    for (i, &byte) in bytes.iter().enumerate() {
+        match byte {
+            b'{' => depth += 1,
+            b'}' => depth = depth.saturating_sub(1),
+            b'"' if depth == 0 => in_quote = !in_quote,
+            b' ' => {
+                let previous = i.checked_sub(1).map(|j| bytes[j]);
+                let next = bytes.get(i + 1).copied();
+                let after_opener = previous == Some(b'{') || (in_quote && previous == Some(b'"'));
+                let before_closer = next == Some(b'}') || (in_quote && next == Some(b'"'));
+                if !after_opener && !before_closer {
+                    words.push(&text[start..i]);
+                    start = i + 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    words.push(&text[start..]);
+    words
 }
 
 /// Prints a value: parts joined by ` # `, white space collapsed inside
@@ -757,6 +866,111 @@ mod tests {
         assert_eq!(trim_blank_lines("  \n\t\n"), "");
         assert_eq!(trim_blank_lines(""), "");
         assert_eq!(normalize_newlines("a\r\nb\rc\n"), "a\nb\rc\n");
+    }
+
+    fn wrapped(input: &str, columns: usize) -> String {
+        fmt_with(
+            input,
+            &FmtOptions {
+                wrap: Some(columns),
+                ..FmtOptions::default()
+            },
+        )
+    }
+
+    #[test]
+    fn wrapping_is_greedy_and_aligns_under_the_value() {
+        let input = "@misc{k,\n  title = {one two three four five six seven},\n  x = 1\n}";
+        let out = wrapped(input, 30);
+        assert_eq!(
+            out,
+            "@misc{k,\n  title = {one two three four\n           five six seven},\n  x     = 1\n}\n"
+        );
+        for line in out.lines() {
+            assert!(line.chars().count() <= 30, "{line:?}");
+        }
+        assert_eq!(wrapped(&out, 30), out, "wrapping is idempotent");
+    }
+
+    #[test]
+    fn wrapping_counts_the_trailing_comma() {
+        // "  a = {bb cc}," is 14 columns with the comma, 13 without.
+        let input = "@misc{k, a = {bb cc}, z = 1}";
+        assert_eq!(wrapped(input, 14), "@misc{k,\n  a = {bb cc},\n  z = 1\n}\n");
+        assert_eq!(
+            wrapped(input, 13),
+            "@misc{k,\n  a = {bb\n       cc},\n  z = 1\n}\n"
+        );
+        let last = "@misc{k, a = {bb cc}}";
+        assert_eq!(wrapped(last, 13), "@misc{k,\n  a = {bb cc}\n}\n");
+    }
+
+    #[test]
+    fn wrapping_never_splits_words_or_touches_delimiters() {
+        let input =
+            "@misc{k, note = \"First \" # \"edition\" # { , ok}, url = {http://a.very/long/url}}";
+        let out = wrapped(input, 20);
+        assert_eq!(
+            out,
+            "@misc{k,\n  note = {First } #\n          {edition}\n          # { , ok},\n  url  = {http://a.very/long/url}\n}\n"
+        );
+        assert_eq!(wrapped(&out, 20), out);
+        assert_eq!(
+            breakable_words("{a b} # {c } # { d} # \"e f\""),
+            ["{a", "b}", "#", "{c }", "#", "{ d}", "#", "\"e", "f\""]
+        );
+    }
+
+    #[test]
+    fn wrapping_with_tabs_and_without_alignment() {
+        let options = FmtOptions {
+            wrap: Some(16),
+            indent: Indent::Tab,
+            align: false,
+            ..FmtOptions::default()
+        };
+        let out = fmt_with("@misc{k, a = {one two three}, bbb = {four five}}", &options);
+        assert_eq!(
+            out,
+            "@misc{k,\n\ta = {one two\n\t     three},\n\tbbb = {four\n\t       five}\n}\n"
+        );
+        assert_eq!(fmt_with(&out, &options), out);
+    }
+
+    #[test]
+    fn tiny_wrap_widths_put_every_word_on_its_own_line() {
+        let out = wrapped("@misc{k, a = {x y z}}", 1);
+        assert_eq!(out, "@misc{k,\n  a = {x\n       y\n       z}\n}\n");
+        assert_eq!(wrapped(&out, 1), out);
+    }
+
+    #[test]
+    fn sort_fields_orders_known_fields_then_the_rest_alphabetically() {
+        let input = "@misc{k, zzz = 1, year = 2, title = 3, note = 4, author = 5, doi = 6, aaa = 7, year = 8}";
+        let default = FmtOptions {
+            sort_fields: SortFields::Default,
+            ..FmtOptions::default()
+        };
+        assert_eq!(
+            fmt_with(input, &default),
+            "@misc{k,\n  author = 5,\n  title  = 3,\n  year   = 2,\n  year   = 8,\n  note   = 4,\n  doi    = 6,\n  aaa    = 7,\n  zzz    = 1\n}\n"
+        );
+        let custom = FmtOptions {
+            sort_fields: SortFields::from_list("doi, zzz"),
+            ..FmtOptions::default()
+        };
+        assert_eq!(
+            fmt_with(input, &custom),
+            "@misc{k,\n  doi    = 6,\n  zzz    = 1,\n  author = 5,\n  title  = 3,\n  year   = 2,\n  year   = 8,\n  note   = 4,\n  aaa    = 7\n}\n"
+        );
+        assert_eq!(
+            fmt_with(&fmt_with(input, &custom), &custom),
+            fmt_with(input, &custom)
+        );
+        assert_eq!(
+            field_order(&["b".to_owned(), "a".to_owned()], &SortFields::Off),
+            [0, 1]
+        );
     }
 
     #[test]

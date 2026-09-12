@@ -173,9 +173,17 @@ on:
   BibTeX performs when it reads a value, so it never changes what BibTeX
   sees. With `--quotes braces` (default), `"..."` parts become `{...}`,
   which is always safe because a `"` inside a quoted string can only occur
-  inside braces. `--wrap` is the only thing that introduces newlines into
-  values; continuation lines align under the value's first character, i.e.
-  indent + padded name + ` = ` + one delimiter, as in LaTeX Workshop.
+  inside braces.
+- `--wrap N` is the only thing that introduces newlines into values. The
+  value, with its trailing comma if it has one, is wrapped greedily so that
+  no line exceeds `N` columns (characters; a tab counts as one).
+  Continuation lines align under the value's first character, i.e. indent +
+  padded name + ` = ` + one delimiter, as in LaTeX Workshop. Breaks happen
+  only at spaces, never right after an opening `{`/`"` or right before a
+  closing one, so `{First } # {edition}` keeps its meaningful trailing space
+  next to its brace; a word longer than the budget gets a line of its own.
+  The wrapped text re-parses to the same collapsed value, which is what
+  makes wrapping idempotent. `@string` values are never wrapped.
 - `@string{name = value}` follows the value rules. `@preamble{...}` and
   `@comment{...}` bodies are printed verbatim (including surrounding white
   space inside the delimiters), except that CRLF inside them becomes the
@@ -197,8 +205,9 @@ on:
   institution, organization, school, type, note, doi, url, urldate, isbn,
   issn, eprint, archiveprefix, primaryclass, keywords, abstract, file`), then
   the remaining fields alphabetically; `--sort-fields=a,b` puts `a` and `b`
-  before the built-in order. Duplicated fields keep their relative order
-  (the sort is stable).
+  before the built-in order. Field names are compared lowercase; duplicated
+  fields keep their relative order (the sort is stable). Alignment is still
+  computed over all fields of the entry.
 
 ## Sorting
 
@@ -410,6 +419,11 @@ Choices made where the brief was silent, with the property they serve.
 25. `keys` prints `old  new` columns (plus the file with several inputs),
     reports go to stderr as warnings, and a missing `--only` key is a
     warning. (composable; multi-file friendly)
+26. `--wrap` counts the trailing comma, never breaks next to a delimiter,
+    counts a tab as one column, and leaves `@string` values alone.
+    (idempotent; BibTeX-equivalent)
+27. `--sort-fields` compares names lowercase, sorts stably, and orders the
+    unknown fields alphabetically after the configured ones. (deterministic)
 
 ## What was borrowed, and from where
 

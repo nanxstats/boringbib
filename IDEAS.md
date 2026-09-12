@@ -24,6 +24,20 @@ that they are not forgotten and not accidentally built.
   `[@key]`, `-@key` and `@{key}` syntax. The `--map` output
   (`old<TAB>new<TAB>file`) is designed to drive it.
 
+## Editor and release integration
+
+Left out of 0.1 as not central to the tool; the `fmt -` stdin/stdout mode
+is all any of them needs.
+
+- A VS Code task bound to a key that runs `boringbib fmt` on the current
+  file, and a private ~40-line VS Code extension registering a
+  `DocumentFormattingEditProvider` for the `bibtex` language that pipes the
+  buffer through `boringbib fmt -`, packaged with `vsce package` and
+  installed from the local `.vsix`.
+- A Neovim `conform.nvim` formatter entry (`command = "boringbib"`,
+  `args = { "fmt", "-" }`).
+- A `cargo-dist` release workflow producing binaries for the Homebrew tap.
+
 ## Other ideas
 
 - `--stdin-filepath PATH` for editors that pipe a buffer through `fmt -` but
