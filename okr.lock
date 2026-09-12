@@ -1,0 +1,37 @@
+version = 2
+okr-version = "0.1.10"
+generated = "1970-01-01T00:00:00Z"
+config-digest = "sha256:71095cbcb528d87769d40a94435a471c59600b5353d19cdd577555c279ac4fad"
+environment-digest = "sha256:76c654316fc12d76f747e651ab210cce2b3f516ef7ca9ee84bc29b39faff1f8e"
+package = []
+
+[[reference]]
+name = "LaTeX-Workshop"
+source = "github::James-Yu/LaTeX-Workshop"
+commit = "96e8a9e29f49ad1635c15db07bb1dc16be482cc6"
+fetch-method = "forge-tarball"
+tree-digest = "sha256:1fe27e290a31345f354009b87f9093f5945cf562a826373b61e496126f9ab75a"
+license = "MIT"
+
+[[reference]]
+name = "biblib"
+source = "github::aclements/biblib"
+commit = "ab0e857b9198fe425ec9b02fcc293b5d9fd0c406"
+fetch-method = "forge-tarball"
+tree-digest = "sha256:66a188550d53d22627a826cd3588b4436a08120ebe48c84e5d944d0efce9e4f4"
+license = "MIT"
+
+[[reference]]
+name = "bibtex-tidy"
+source = "github::FlamingTempura/bibtex-tidy"
+commit = "0b1f037b15c36416c13a1e71b32b1d173d9e100f"
+fetch-method = "forge-tarball"
+tree-digest = "sha256:6561997edf97a3d0b99eb1fe536ef4196e97fb7588b5217c0263856972ed3604"
+license = "MIT"
+
+[[reference]]
+name = "tamethebeast"
+source = "url::https://mirrors.mit.edu/CTAN/info/bibtex/tamethebeast.zip"
+url = "https://mirrors.mit.edu/CTAN/info/bibtex/tamethebeast.zip"
+fetch-method = "tarball"
+tree-digest = "sha256:12a68cfc6e5387b24ea0cf4acce416fa220303a0bb7a62c7f95f0a0e6821af4a"
