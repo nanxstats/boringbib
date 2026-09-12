@@ -5,10 +5,11 @@ edition = "2024"
 rust-version = "1.85"
 description = "A boring BibTeX formatter"
 license = "MIT"
-repository = "https://github.com/nanxstats/boringbib"
 readme = "README.md"
+repository = "https://github.com/nanxstats/boringbib"
 keywords = ["bibtex", "bibliography", "formatter", "latex", "cli"]
 categories = ["command-line-utilities", "text-processing"]
+authors = ["Nan Xiao <me@nanx.me>"]
 exclude = ["/deps-src", "/.github", "/okr.toml", "/okr.lock"]
 
 [dependencies]
