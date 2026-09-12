@@ -3,17 +3,15 @@
 [![crates.io](https://img.shields.io/crates/v/boringbib.svg)](https://crates.io/crates/boringbib)
 [![CI tests](https://github.com/nanxstats/boringbib/actions/workflows/ci.yml/badge.svg)](https://github.com/nanxstats/boringbib/actions/workflows/ci.yml)
 
-A boring BibTeX formatter. That's the point.
+A boring BibTeX formatter.
 
-`boringbib` does two things to `.bib` files, deterministically, idempotently,
-and without touching a byte you did not ask it to change:
+`boringbib` formats `.bib` files deterministically, idempotently, and without
+touching a byte you did not ask it to change.
 
-- `boringbib fmt` sorts entries by citation key and pretty-prints each entry
-  with the `=` signs aligned, exactly like LaTeX Workshop's "Align and sort"
-  action.
-- `boringbib keys` rewrites citation keys into Google Scholar style
-  (`vaswani2017attention`) and updates `crossref` and friends inside the file
-  so nothing dangles.
+- `boringbib fmt` sorts entries by citation key and pretty prints each entry
+  with the `=` signs aligned.
+- `boringbib keys` rewrites citation keys into Google Scholar style and
+   updates `crossref` and friends inside the file so nothing dangles.
 
 ## Install
 
