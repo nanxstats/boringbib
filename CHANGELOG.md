@@ -1,5 +1,12 @@
 # Changelog
 
+## boringbib 0.1.1
+
+### Documentation
+
+- Rewrote the README, changelog, design notes, and ideas document with
+  plainer wording, shorter sentences, and clearer organization (#6).
+
 ## boringbib 0.1.0
 
 ### New features
