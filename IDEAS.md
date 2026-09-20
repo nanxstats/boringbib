@@ -1,46 +1,53 @@
 # Ideas
 
-Things that are deliberately not part of boringbib 0.1. Recorded here so
-that they are not forgotten and not accidentally built.
+This document records possible additions to boringbib. They are outside the
+scope of version 0.1; listing them here does not commit us to building them.
 
 ## Out of scope for 0.1
 
 - Fetching metadata from the network (DOI, Crossref, arXiv).
-- Deduplication of entries.
-- Title case or brace protection edits to field values.
-- biblatex data model validation.
-- An LSP server.
-- Python (PyO3/maturin) and R (extendr) bindings. `lib.rs` exists so that
-  they can be added without touching the command-line layer.
-- A JabRef-style key template language. `keys::KeyParts` and `keys::Style`
-  are the seam: a template engine consumes the same parsed parts, so the name
-  and title parsing would not change.
+- Finding and removing duplicate entries.
+- Changing title capitalization or adding braces to protect it.
+- Checking entries against the biblatex data model.
+- A language server (LSP) for editors.
+- Python bindings using PyO3/maturin and R bindings using extendr. The
+  library in `lib.rs` would let us add these without changing the command
+  line interface.
+- A template language for citation keys, similar to JabRef's. A new
+  `keys::Style` could combine the existing `keys::KeyParts` in a different
+  way, reusing the name and title parsers.
 
-## Planned, only when asked (phase 5)
+## Citation rewriting
 
-- `boringbib keys --rewrite GLOB...`: update citations in `.tex`, `.qmd`,
-  `.Rmd` and `.md` files from the mapping: all `\cite`-family commands,
-  including starred and optional-argument forms, and Pandoc `@key`,
-  `[@key]`, `-@key` and `@{key}` syntax. The `--map` output
-  (`old<TAB>new<TAB>file`) is designed to drive it.
+Citation rewriting is planned for phase 5, but implementation should wait
+until it is requested. The proposed `boringbib keys --rewrite GLOB...`
+would update citations in `.tex`, `.qmd`, `.Rmd`, and `.md` files using the
+mapping saved by `--map` (`old<TAB>new<TAB>file`).
+
+It would support the `\cite` family of commands, including forms with a
+star or optional arguments. For Pandoc documents, it would support `@key`,
+`[@key]`, `-@key`, and `@{key}`.
 
 ## Editor and release integration
 
-Left out of 0.1 as not central to the tool; the `fmt -` stdin/stdout mode
-is all any of them needs.
+Editor support and release automation are also outside the scope of 0.1.
+Editors can already use `boringbib fmt -` to send text through stdin and
+receive the formatted result on stdout.
 
-- A VS Code task bound to a key that runs `boringbib fmt` on the current
-  file, and a private ~40-line VS Code extension registering a
-  `DocumentFormattingEditProvider` for the `bibtex` language that pipes the
-  buffer through `boringbib fmt -`, packaged with `vsce package` and
-  installed from the local `.vsix`.
+- A VS Code task with a keyboard shortcut to run `boringbib fmt` on the
+  current file.
+- A small VS Code extension for local use, estimated at about 40 lines.
+  It would register a `DocumentFormattingEditProvider` for `bibtex` and
+  pass the editor buffer through `boringbib fmt -`. You could package it
+  with `vsce package` and install the resulting `.vsix` file.
 - A Neovim `conform.nvim` formatter entry (`command = "boringbib"`,
   `args = { "fmt", "-" }`).
-- A `cargo-dist` release workflow producing binaries for the Homebrew tap.
+- A release workflow using `cargo-dist` to produce binaries for the
+  Homebrew tap.
 
 ## Other ideas
 
-- `--stdin-filepath PATH` for editors that pipe a buffer through `fmt -` but
-  want `boringbib.toml` discovered relative to the file rather than the
-  working directory.
-- A `--sort` of `year-desc` (newest first), as LaTeX Workshop offers.
+- `--stdin-filepath PATH` for editors that send text through `fmt -`.
+  This would let boringbib find `boringbib.toml` relative to the file being
+  edited rather than the working directory.
+- `--sort year-desc` to put the newest entries first, as LaTeX Workshop offers.
