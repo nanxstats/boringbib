@@ -4,11 +4,16 @@
 
 ### New features
 
-- `boringbib fmt`: sort entries by citation key and align the `=` signs of
-  each entry, LaTeX Workshop style, with `--check` and `--diff` modes,
-  atomic in-place writes, stdin/stdout support, and the extra `--wrap` and
-  `--sort-fields` options.
-- `boringbib keys`: rewrite citation keys into Google Scholar style and
-  update `crossref`, `xref`, `related`, `ids`, `entryset` and `xdata`
-  references inside the file, with `--only`, `--write` and `--map`.
-- Optional `boringbib.toml` configuration file.
+- `boringbib fmt` sorts entries by citation key and aligns the `=` signs
+  within each entry. The default format follows LaTeX Workshop. Use `--wrap`
+  to wrap long values and `--sort-fields` to choose the field order.
+- `boringbib fmt --check` reports files that need formatting, and `--diff`
+  shows the proposed changes. You can format files in place or pass text
+  through stdin and stdout. Files are replaced only after the output has
+  been written successfully.
+- `boringbib keys` rewrites citation keys in the style used by Google
+  Scholar. It also updates references in `crossref`, `xref`, `related`,
+  `ids`, `entryset`, and `xdata` fields within the file. Use `--only` to
+  select keys, `--write` to apply changes, and `--map` to save the old and
+  new keys.
+- You can save settings in an optional `boringbib.toml` file.

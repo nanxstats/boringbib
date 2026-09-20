@@ -1,42 +1,45 @@
 # Design
 
-`boringbib` is boring in the "choose boring technology" sense.
-Everything below serves three properties, in this order of priority
-whenever they conflict:
+boringbib aims to be predictable. Its design follows three priorities,
+listed here in the order used to resolve conflicts:
 
-1. **Lossless.** The user's data is never changed except where they asked.
-2. **Idempotent.** `fmt(fmt(x)) == fmt(x)`; `keys` twice is a no-op.
-3. **Deterministic.** Same input and options, same bytes, on every platform.
+1. Preserve the user's data except where they asked for a change.
+2. Running `fmt` or `keys` twice should have the same result as running it once.
+3. The same input and options should produce exactly the same bytes on every platform.
 
-Where the specification was silent, the choice that maximizes these was
-taken and is recorded in the [decision log](#decision-log) at the end.
+These properties are often called losslessness, idempotence, and determinism.
+The [decision log](#decision-log) explains how they guide individual choices.
 
 ## Architecture
 
-One crate, one binary, a library underneath so that bindings (Python via
-PyO3, R via extendr) can be added later without touching the CLI.
+The project has one Rust crate containing a binary and a library.
+The library does the parsing, formatting, and key generation.
+This separation would let us add Python bindings with PyO3 or R bindings
+with extendr without changing the command line interface.
 
 ```
 src/
   main.rs        the binary: calls cli::run()
-  lib.rs         crate docs, module list, the Error type
-  cli.rs         clap definitions, option resolution (CLI > file > default), run()
-  lexer.rs       cursor over the text, character classes, positions, ParseError
+  lib.rs         crate documentation, modules, and the Error type
+  cli.rs         command definitions, settings, and run()
+  lexer.rs       reading characters and tracking positions, ParseError
   parser.rs      the grammar: text -> Cst
-  cst.rs         the lossless tree: spans into the source, to_source(), splicing
-  printer.rs     fmt: options and the pretty-printer
-  sort.rs        grouping of blocks and the entry orderings
+  cst.rs         source text, syntax tree, and text replacements
+  printer.rs     formatting options and output
+  sort.rs        grouping and ordering blocks
   config.rs      boringbib.toml
   keys/
-    mod.rs       keys: plan (compute renames + reference edits) and apply
+    mod.rs       planning and applying key and reference changes
     names.rs     BibTeX name lists and the three name forms
     latex.rs     LaTeX -> Unicode table, for key generation only
     stopwords.rs verified and assumed stop word lists
 tests/
-  fixtures/      .bib inputs, golden outputs, the Scholar key corpus (TSV)
+  fixtures/      .bib inputs, expected outputs, and Scholar key examples (TSV)
 ```
 
-Data flow:
+Both commands start by parsing the input into a concrete syntax tree (`Cst`).
+Formatting sorts and prints the blocks. Key rewriting plans the
+text replacements, then applies them:
 
 ```
 text ──parse()──▶ Cst ──sort::group()/sort()──▶ printer::format() ──▶ text
@@ -44,37 +47,45 @@ text ──parse()──▶ Cst ──sort::group()/sort()──▶ printer::for
                    └──keys::plan()──▶ Plan ──keys::apply()──▶ text
 ```
 
-Dependencies, all boring: `clap` (derive) for the CLI, `anyhow` +
-`thiserror` for errors, `deunicode` for Unicode-to-ASCII transliteration,
-`unicode-normalization` for the NFC step of key generation, `serde` + `toml`
-for the configuration file, `similar` for `--diff`. Dev: `insta`,
-`assert_cmd`, `predicates`. No BibTeX parsing crate: the parser is the
-product. No `unsafe`.
+The main dependencies are:
+
+| Crates | Purpose |
+| --- | --- |
+| `clap` with derive support | Parse command line arguments |
+| `anyhow`, `thiserror` | Handle errors |
+| `deunicode` | Convert Unicode text to ASCII for citation keys |
+| `unicode-normalization` | Normalize Unicode before generating keys |
+| `serde`, `toml` | Read configuration files |
+| `similar` | Produce diffs |
+
+Tests use `insta`, `assert_cmd`, and `predicates`. boringbib has its own
+BibTeX parser and uses no `unsafe` code.
 
 ## The tree
 
-The `Cst` owns the exact source text (minus a leading byte-order mark, which
-is recorded as a flag) and a list of blocks that **tile** it: block *n* ends
-where block *n+1* starts, the first starts at byte 0 and the last ends at the
-last byte. Nodes hold `Span`s (byte ranges) into the source rather than
-copies of the text.
+The `Cst` stores the original source text and a list of blocks. The blocks
+cover the entire source without gaps or overlaps: the first starts at
+byte 0, each block starts where the previous one ends, and the last reaches
+the end of the source. Each node holds a `Span`, a range of bytes in that
+source, instead of its own copy of the text.
 
-This makes losslessness structural rather than something each node has to
-get right: `to_source()` is the source plus the mark, and the tiling
-invariant is asserted when a tree is built. A targeted edit (renaming a key,
-rewriting a `crossref`) is a list of `(Span, replacement)` pairs spliced into
-the source by `Cst::with_replacements`; every byte outside those spans is
-untouched by construction. After an edit the tree is simply re-parsed.
+A leading byte order mark is stored separately as a flag. `to_source()`
+returns the original text with the mark restored. When the tree is built,
+an assertion checks that the blocks cover the source exactly.
 
-Line endings are **not** normalized in the tree: `\r` is white space to the
-lexer, so CRLF files parse as-is and round-trip byte for byte. The printer
-is the only place that knows about line endings (see
-[Line endings and the byte-order mark](#line-endings-and-the-byte-order-mark)).
+To rename a key or update a `crossref`, `Cst::with_replacements` takes a
+list of `(Span, replacement)` pairs. It replaces those ranges and leaves
+every other byte untouched. The edited text is then parsed again.
+
+The tree also preserves line endings. The lexer treats `\r` as white
+space, so a file with CRLF endings can be parsed and returned byte for
+byte. Only the printer changes line endings; see
+[Line endings and the byte order mark](#line-endings-and-the-byte-order-mark).
 
 ## Grammar
 
-Transcribed from what BibTeX accepts (`bibtex.web`, via biblib's faithful
-transcription), with the relaxations listed after it.
+The grammar follows BibTeX's `bibtex.web`, as transcribed by biblib.
+The differences are described below.
 
 ```
 file      := block*
@@ -88,360 +99,482 @@ value     := part ( '#' part )*
 part      := '{' balanced '}' | '"' quoted '"' | number | ident
 ```
 
-White space may appear between any two tokens above. The block name and
-the field names are case-insensitive and stored as written. Character
-classes (from BibTeX's `id_class` and key scanning):
+White space may appear between any two tokens above. Block and field names
+are stored as written, but matched without regard to case. The character
+rules follow BibTeX's `id_class` and key scanning:
 
 - White space: space, tab, LF, CR, form feed (`char::is_ascii_whitespace`).
-- Identifier: non-empty run of characters that are neither white space nor
-  one of `" # % ' ( ) , = { }`.
-- Key: possibly empty run of characters that are neither white space nor one
-  of `, { } ( ) "`.
-- Number: identifier consisting only of ASCII digits. Any other bare token in
-  value position is a macro name. Macros are never resolved.
-- `balanced`: braces nest and must balance. In a `"..."` string braces must
-  balance and `"` may only appear inside braces. A `(...)` body ends at the
-  first `)` at brace depth 0; parentheses do not nest, as in BibTeX.
+- Identifier: one or more characters, excluding white space and
+  `" # % ' ( ) , = { }`.
+- Key: zero or more characters, excluding white space and `, { } ( ) "`.
+- Number: an identifier made entirely of ASCII digits. Any other value
+  without quotes or braces is a macro name. Macros are never resolved.
+- `balanced`: braces may nest, but every opening brace must have a matching
+  closing brace. This also applies inside a `"..."` string, where a `"`
+  character is allowed only within braces. A `(...)` body ends at the first
+  `)` outside braces. Parentheses do not nest, as in BibTeX.
 
-Relaxations, none of which can lose data:
+### Accepted input
 
-- **Junk.** `@` starts a block only when followed by optional white space,
-  an identifier, optional white space and `{` or `(`. Any other `@` is
-  junk. This is what makes prose, email addresses and `%` comment lines safe.
-  A `@name` that sits at the start of a line (after optional white space),
-  is not `@comment`, and is not followed by a delimiter gets a **warning**,
-  since it is usually a broken entry; BibTeX itself would stop with an error.
-- **Identifiers** may start with a digit and may contain non-ASCII
-  characters. BibTeX would reject `3d = {...}`; boringbib prints it back
-  unchanged, which is not its job to police. Note that `[`, `]`, `@`, `:`
-  and most other punctuation are identifier characters (as in BibTeX), so
-  `title = [x]` is a macro named `[x]`, not a syntax error.
+The parser accepts some input that BibTeX would reject. It preserves that
+input and warns where appropriate:
+
+- **Text outside blocks**, called "junk" in the parser, is preserved.
+  An `@` starts a block only when followed by an identifier and then `{`
+  or `(`, with optional white space between them. Other uses of `@`, such
+  as in email addresses or prose, remain ordinary text. If a line starts
+  with `@name` after optional white space but has no opening delimiter,
+  the parser warns that it may be a broken entry. `@comment` is exempt
+  from this warning. BibTeX would stop with an error for the broken entry.
+- **Identifiers** may start with a digit and contain characters outside
+  ASCII. For example, boringbib preserves `3d = {...}`, which BibTeX would
+  reject. As in BibTeX, `[`, `]`, `@`, `:`, and most other punctuation are
+  valid identifier characters. Thus `title = [x]` refers to a macro named
+  `[x]`.
 - **Keys** may be empty (`@misc{, title = ...}`), as in BibTeX.
-- **Duplicate field names** in one entry are kept, both of them, with a
-  warning. BibTeX uses the first; `Entry::field` returns the first.
+- **Duplicate field names** produce a warning, but all occurrences are
+  kept. `Entry::field` returns the first, matching BibTeX's behavior.
 
-One deliberate deviation from BibTeX, shared with biber, JabRef and
-bibtex-tidy: `@comment{...}` has a brace-balanced body that is preserved
-verbatim. BibTeX proper treats `@comment` as "skip to the next `@`", so an
-`@entry` inside a `@comment{...}` body is an entry to BibTeX and a comment
-to everyone else. A `@comment` that is not followed by a delimiter falls
-under the junk rule, which matches BibTeX exactly.
+boringbib also differs from BibTeX in how it reads `@comment{...}`. It
+requires balanced braces and preserves the entire body, as biber, JabRef,
+and `bibtex-tidy` do. BibTeX skips from `@comment` to the next `@`, so it
+would read an `@entry` inside that body as an entry. A `@comment` without
+an opening delimiter is treated as text outside a block, matching BibTeX.
 
-Errors stop at the first problem and are reported as `line:col: message`
-(the CLI prefixes the file name); line and column are 1-based and the
-column counts characters, not bytes. An unclosed `{`, `(` or `"` is reported
-at its opening character, since that is where the fix goes; every other
-error is reported where the unexpected character is and says what was found
-(`expected \`,\` or \`}\`, found \`y\``, `..., found end of file`). The
-messages are: `unbalanced braces: this \`{\` is never closed`, `unbalanced
-braces: unexpected \`}\` inside a quoted string`, `unterminated quoted
-string`, `unbalanced parentheses: this \`(\` is never closed`, `expected
-\`=\` after field name \`x\``, `expected \`=\` after macro name \`x\``,
-`expected \`,\` or \`}\``, `expected a field name`, `expected a macro
-name`, `expected a value (\`{...}\`, \`"..."\`, a number or a macro name)`,
-`expected \`}\``. Warnings go to stderr as `file:line:col: warning: message`
-and never change the exit status.
+### Errors and warnings
+
+Parsing stops at the first error. Errors use `line:col: message`, with the
+file name added by the command line interface. Lines and columns start at
+1, and columns count characters rather than bytes.
+
+An unclosed `{`, `(`, or `"` is reported at its opening character to help
+you find what needs fixing. Other errors point to the unexpected character
+and say what was found. For example:
+
+```text
+expected `,` or `}`, found `y`
+expected `,` or `}`, found end of file
+```
+
+The parser uses these messages, adding what it found where appropriate:
+
+```text
+unbalanced braces: this `{` is never closed
+unbalanced braces: unexpected `}` inside a quoted string
+unterminated quoted string
+unbalanced parentheses: this `(` is never closed
+expected `=` after field name `x`
+expected `=` after macro name `x`
+expected `,` or `}`
+expected a field name
+expected a macro name
+expected a value (`{...}`, `"..."`, a number or a macro name)
+expected `}`
+```
+
+Warnings go to stderr as `file:line:col: warning: message`. They do not
+change the exit status.
 
 ## Formatting
 
-The printer writes every block from scratch in the order chosen by the
-sorter; it never copies an entry's original layout. The rules, with the
-defaults matching LaTeX Workshop's formatter with `align-equal` and sorting
-on:
+The printer creates a new layout for each block, in the order chosen by
+the sorter. The defaults match LaTeX Workshop's formatter with
+`align-equal` and sorting enabled.
 
-- Block names, entry types and field names in lowercase; keys untouched.
-  Lowercasing is ASCII-only, exactly the case folding BibTeX applies to
-  identifiers; a non-ASCII letter in a field name is left as written. Macro
-  names (`@string{JMLR = ...}`, `journal = JMLR`) keep their case too: BibTeX
-  matches them case-insensitively, and the brief asks for lowercase entry
-  types and field names, nothing else. All blocks use braces, even if
-  written with parentheses; there is no white space between `@name` and `{`.
-- Entry: `@type{key,` on one line; one field per line, indented (`--indent`,
-  default two spaces); ` = ` between the field name (padded to the longest
-  field name **in that entry** when `--align` is on) and the value; `,` after
-  every field but the last (unless `--trailing-comma`); `}` on its own line.
-  An entry without fields prints as `@type{key` newline `}` (with
-  `--trailing-comma`: `@type{key,`), which is what LaTeX Workshop does and
-  what BibTeX accepts.
-- Values: numbers stay bare, macros stay macros, concatenations print as
-  `{First } # {edition}` with single spaces around `#`. Inside every `{...}`
-  or `"..."` part, each run of white space (newlines included) collapses to
-  one space, at every brace depth. The **whole value** is then trimmed at
-  its two ends: leading white space of the first part and trailing white
-  space of the last part. Parts are not trimmed individually, because
-  `"First " # "edition"` needs its space. This is exactly the normalization
-  BibTeX performs when it reads a value, so it never changes what BibTeX
-  sees. With `--quotes braces` (default), `"..."` parts become `{...}`,
-  which is always safe because a `"` inside a quoted string can only occur
-  inside braces.
-- `--wrap N` is the only thing that introduces newlines into values. The
-  value, with its trailing comma if it has one, is wrapped greedily so that
-  no line exceeds `N` columns (characters; a tab counts as one).
-  Continuation lines align under the value's first character, i.e. indent +
-  padded name + ` = ` + one delimiter, as in LaTeX Workshop. Breaks happen
-  only at spaces, never right after an opening `{`/`"` or right before a
-  closing one, so `{First } # {edition}` keeps its meaningful trailing space
-  next to its brace; a word longer than the budget gets a line of its own.
-  The wrapped text re-parses to the same collapsed value, which is what
-  makes wrapping idempotent. `@string` values are never wrapped.
-- `@string{name = value}` follows the value rules. `@preamble{...}` and
-  `@comment{...}` bodies are printed verbatim (including surrounding white
-  space inside the delimiters), except that CRLF inside them becomes the
-  output line ending.
-- Junk is printed verbatim except that leading and trailing blank lines
-  (lines that are empty or only white space) are dropped; the indentation
-  and trailing spaces of the remaining lines are kept. Junk that is only
-  white space disappears; that is how the blank lines between blocks are
-  normalized.
-- Exactly one blank line between blocks. A run of junk and `@comment`
-  blocks is printed immediately before the block it precedes, with no blank
-  line between them or before that block. A trailing run at the end of the
-  file is printed last, after one blank line. The output ends with exactly
-  one newline, or is empty when there is nothing to print (an empty or
-  white-space-only file).
-- `--sort-fields` reorders the fields of each entry by the built-in order
-  (`author, editor, title, booktitle, journal, year, month, volume, number,
-  pages, publisher, address, edition, series, chapter, howpublished,
-  institution, organization, school, type, note, doi, url, urldate, isbn,
-  issn, eprint, archiveprefix, primaryclass, keywords, abstract, file`), then
-  the remaining fields alphabetically; `--sort-fields=a,b` puts `a` and `b`
-  before the built-in order. Field names are compared lowercase; duplicated
-  fields keep their relative order (the sort is stable). Alignment is still
-  computed over all fields of the entry.
+### Names and entry layout
+
+Block names, entry types, and field names become lowercase. This applies
+only to ASCII letters, matching BibTeX's rules. Letters outside ASCII,
+citation keys, and macro names keep their original spelling. For example,
+`JMLR` stays uppercase in both `@string{JMLR = ...}` and `journal = JMLR`.
+BibTeX matches macro names without regard to case.
+
+All blocks use braces, including those originally written with parentheses.
+There is no white space between `@name` and `{`. Entries use this layout:
+
+- The first line is `@type{key,`.
+- Each field gets its own line. `--indent` controls the indentation, which
+  defaults to two spaces.
+- The field name and value are separated by ` = `. With `--align`, field
+  names are padded to the length of the longest name in that entry.
+- Each field except the last ends with a comma. `--trailing-comma` adds a
+  comma to the last field too.
+- The closing `}` is on its own line.
+
+An entry without fields has `@type{key` on the first line and `}` on the
+next. With `--trailing-comma`, the first line is `@type{key,`. This matches
+LaTeX Workshop, and BibTeX accepts both forms.
+
+### Values
+
+Numbers stay bare and macros remain unresolved. Parts joined with `#`
+have one space on either side of it, as in `{First } # {edition}`.
+
+Within each `{...}` or `"..."` part, a run of white space becomes one
+space. This includes newlines and white space inside nested braces. The
+printer then removes white space from the start and end of the whole
+value. It keeps spaces between parts because, for example,
+`"First " # "edition"` needs the space after `First`. These rules match
+how BibTeX reads values, so the value it sees is unchanged.
+
+By default, `--quotes braces` converts `"..."` parts to `{...}`. This is
+safe because any quote character inside a quoted string must already be
+enclosed in braces. `@string{name = value}` follows the same value rules.
+
+### Wrapping
+
+`--wrap N` adds newlines to values. It puts as many words as possible on
+each line within `N` columns, counting any trailing comma. Columns count
+characters, with a tab counting as one. A word that cannot fit gets a line
+of its own, even if that line exceeds the limit.
+
+Continuation lines start under the first character inside the value's
+opening delimiter. The indentation accounts for the field's indentation,
+padded name, ` = `, and opening delimiter, matching LaTeX Workshop.
+
+Lines break only at spaces, and never immediately after an opening brace
+or quote or before a closing one. This preserves the space after `First`
+in `{First } # {edition}`. Parsing the wrapped text produces the same
+value, and formatting it again produces the same output. `@string` values
+are never wrapped.
+
+### Comments and spacing
+
+The bodies of `@preamble{...}` and `@comment{...}` are preserved, including
+white space inside the delimiters. Any CRLF endings within them are
+converted to the output line ending.
+
+Text outside blocks keeps its indentation and trailing spaces. Leading
+and trailing blank lines are removed; a blank line is empty or contains
+only white space. Text consisting entirely of white space is removed.
+
+Blocks are separated by one blank line. Comments and text attached to a
+block appear directly before it, with no blank lines between them or
+before the block. Comments and text at the end of the file appear last,
+after one blank line.
+
+The output ends with exactly one newline. If the input is empty or
+contains only white space, the output is empty.
+
+### Field order
+
+`--sort-fields` puts fields in this order:
+
+```text
+author, editor, title, booktitle, journal, year, month, volume, number,
+pages, publisher, address, edition, series, chapter, howpublished,
+institution, organization, school, type, note, doi, url, urldate, isbn,
+issn, eprint, archiveprefix, primaryclass, keywords, abstract, file
+```
+
+Any remaining fields follow in alphabetical order. `--sort-fields=a,b`
+puts `a` and `b` first, followed by the default order. Names are compared
+in lowercase, and duplicate fields keep their relative order. Alignment
+still uses the longest name across all fields in the entry.
 
 ## Sorting
 
-Sorting acts on **groups**: every run of junk and `@comment` blocks is
-attached to the block that follows it, so a comment describing an entry
-moves with the entry. A trailing run at the end of the file is a group of
-its own and always stays last.
+Sorting moves blocks together with the comments and text that precede
+them. These form a **group**, so a comment describing an entry stays with
+that entry. Comments and text at the end of the file form their own group
+and always stay last.
 
-- `key` (default): `@preamble` and `@string` groups first, in their original
-  relative order; then entries ordered by `key.to_lowercase()`, ties broken
-  by the original key in byte order, then by original position. Lowercase
-  comparison replaces LaTeX Workshop's `localeCompare`, which depends on the
-  machine's locale and is therefore not deterministic.
-- `year`: numerically ascending by the first 4-digit number in `year`, else
-  in `date`; entries without one come last; ties by key.
-- `type`: by entry type (lowercase), then key.
-- `author`: by the first author's last name as computed by the key
-  generator (so `van der Maaten` sorts under `v`), then year, then key.
-- `none`: file order, nothing moves, `@string` blocks included.
+`--sort` chooses the order:
 
-All sorts are stable.
+- `key` (the default) puts `@preamble` and `@string` groups first, keeping
+  their original relative order. Entries follow, sorted by
+  `key.to_lowercase()`. Ties are broken by the original key in byte order,
+  then by the entry's original position.
+- `year` sorts from oldest to newest using the first number with four
+  digits in `year`, falling back to `date`. Entries without a year come
+  last. Ties are broken by key.
+- `type` sorts by the lowercase entry type, then by key.
+- `author` sorts by the first author's last name, then by year, then by
+  key. It uses the key generator's name parser, so `van der Maaten` sorts
+  under `v`.
+- `none` keeps the original file order, including `@string` blocks.
 
-## Line endings and the byte-order mark
+All sorts are stable: entries that compare equal keep their relative order.
+Key sorting uses lowercase byte comparison instead of LaTeX Workshop's
+`localeCompare`. This gives the same order regardless of the machine's
+locale.
 
-- **Reading.** A leading UTF-8 byte-order mark is stripped and remembered.
-  Invalid UTF-8 is an error naming the file and the byte offset. Line
-  endings are left alone in the tree.
-- **`fmt` output.** The printer produces LF; verbatim pieces (junk,
-  `@comment` and `@preamble` bodies) have their CRLF turned into LF as they
-  are copied, and a final pass turns LF into CRLF when the target is CRLF.
-  A lone `\r` (no following `\n`) is kept where it was. The target is
-  `--line-ending`: `lf`, `crlf`, or `auto` (default), where `auto` means
-  CRLF if the **first line ending in the input** is CRLF and LF otherwise.
-  A file with mixed endings therefore comes out consistent, following its
-  first line. The byte-order mark is dropped unless `--keep-bom`.
-- **`keys` output.** `keys` is a splice of the original text: it keeps the
-  mark, the line endings and every byte outside the edited spans, and
-  `--line-ending`/`--keep-bom` do not apply to it.
+## Line endings and the byte order mark
+
+When reading a file, boringbib removes a leading `UTF-8` byte order mark
+and records its presence. Invalid `UTF-8` produces an error with the file
+name and byte offset. The tree preserves the original line endings.
+
+For `fmt`, the printer first produces LF endings. It also converts CRLF
+to LF in text copied from outside blocks and from `@comment` and
+`@preamble` bodies. If CRLF output is requested, a final pass converts LF
+to CRLF. A lone `\r`, without a following `\n`, stays where it was.
+
+`--line-ending` accepts `lf`, `crlf`, or `auto`. The default, `auto`, uses
+CRLF if the first line ending in the input is CRLF, and LF otherwise.
+This makes files with mixed LF and CRLF endings consistent. `fmt` removes
+the byte order mark unless `--keep-bom` is set.
+
+`keys` replaces text in the original source, so it preserves the byte order
+mark, line endings, and every byte outside the replaced ranges.
+`--line-ending` and `--keep-bom` apply only to `fmt`.
 
 ## Writing files
 
-In-place writes go to a temporary file in the same directory, which is then
-renamed over the original, so a crash or a parse error can never leave a
-half-written file. The original's permissions are copied to the temporary
-file first. If the path is a symbolic link, the link is resolved and the
-target is replaced, not the link. A file whose formatted output is identical
-to its content is not rewritten at all (no timestamp change). With several
-files, each is processed independently: an error in one is reported and the
-others are still processed; the exit status is 2 if any failed, else 1 if
-`--check` found a difference, else 0.
+To update a file in place, boringbib writes the output to a temporary file
+in the same directory. It copies the original permissions, then renames
+the temporary file over the original. This prevents a crash or parse error
+from leaving the original partly written.
 
-`fmt -` reads stdin and writes stdout; so does `fmt` with no files when
-stdin is not a terminal. `--check` and `--diff` work on stdin too, reporting
-the file as `<stdin>`. `--check` prints `would reformat FILE` to stdout for
-each file that differs (the list is the result, so it is not stderr);
-`--diff` prints a unified diff with `a/FILE` and `b/FILE` headers so that
-`patch -p1` applies it. Warnings are printed even in these modes. A file
-that is already formatted produces no output at all.
+If the path is a symbolic link, boringbib resolves it and replaces the
+target, preserving the link. Files whose output matches their contents are
+left untouched, including their timestamps.
+
+Each file is processed independently. If one fails, boringbib reports the
+error and continues with the others. The exit status is 2 if any file
+failed, 1 if `--check` found a difference, and 0 otherwise.
+
+`fmt -` reads stdin and writes stdout. `fmt` also does this when no files
+are given and stdin is not a terminal. `--check` and `--diff` accept stdin
+too, using `<stdin>` as the file name:
+
+- `--check` prints `would reformat FILE` to stdout for each file that
+  would change.
+- `--diff` prints a unified diff with `a/FILE` and `b/FILE` headers, so
+  you can apply it with `patch -p1`.
+
+Both modes still print warnings. Files that are already formatted produce
+no formatting report or diff.
 
 ## Keys
 
-The algorithm is specified in full in the project brief and summarized in
-`src/keys/mod.rs`; the corpus of real Google Scholar keys in
-`tests/fixtures/scholar_keys.tsv` is the ground truth, and its fifth column
-records whether a row was verified against Scholar's export. Design choices
-around it:
+`src/keys/mod.rs` summarizes how keys are generated. The examples in
+`tests/fixtures/scholar_keys.tsv` provide the expected results. The fifth
+column records whether each example was verified against Google Scholar's
+export.
 
-- The name and title parsers produce plain `KeyParts { author, year,
-  title }`; a `Style` assembles them. A JabRef-style template engine would be
-  another `Style` consuming the same parts.
-- LaTeX decoding (`keys/latex.rs`) works on a copy of the field text; the
-  tree is never interpreted. The decoder keeps braces so that corporate
-  authors (`{OpenAI}`) can still be recognized; braces are stripped
-  afterwards.
-- `$...$` math is removed from titles **before** LaTeX decoding, so that an
-  escaped `\$` in a title is not mistaken for a math delimiter once decoded.
-- NFC normalization uses the `unicode-normalization` crate: accents typed
-  as combining sequences and accents produced by the decoder must
-  transliterate identically. The decoder emits combining marks and
-  normalizes its whole output, so `\"o`, `\"{o}`, `{\"o}`, `{\" o}` and a
-  literal `ö` are all the same string afterwards.
-- The decoder follows TeX's tokenization: a control word is the longest run
-  of letters (`\oe` is not `\o` + `e`), white space after a control word is
-  part of it (`\o rsted` is `ørsted`), and an accent's argument may be
-  preceded by white space, as any undelimited TeX argument may. An unknown
-  command without an argument is deleted but the white space after it is
-  kept, so `\LaTeX companion` still has two words. `\textendash` and the
-  other commands the brief lists are treated as unknown commands, as it
-  specifies. Two control symbols the brief does not mention are mapped to a
-  space because that is what they are: the control space `\ ` and the line
-  break `\\`.
-- An `author`, `editor` or `title` whose value uses a macro (`author =
-  goossens # and # mittelbach`) cannot be interpreted, since macros are never
-  resolved; the entry is reported and left unchanged. (A `year` macro just
-  yields no year part.) `--sort author`, which shares the name parser, uses
-  the macro names as text instead: for ordering that is harmless.
-- `$...$` and `$$...$$` are removed from titles before decoding, with `\$`
-  kept as an escape; a title with an unmatched `$` keeps its text minus the
-  `$` signs.
-- Reference fields (`crossref`, `xref`; the lists `related`, `ids`,
-  `entryset`, `xdata`) are edited only when the value is a single `{...}` or
-  `"..."` part; the inner text is spliced, the delimiter kept. Anything
-  else (a concatenation, a macro) is reported and left alone. List entries
-  are matched as whole keys, trimmed of white space.
-- Collision suffixes: keys are assigned in file order; an entry gets its
-  base key if that is free, else the base key plus `a`, `b`, ... `z`, `aa`,
-  `ab`, ... (the first free one). Within a group of entries that share a
-  base key this is exactly "first keeps the bare key, second gets `a`".
-  Keys of entries that are not rewritten (not selected through `--only`,
-  listed in `[keys] keep`, or skipped because they have no author or title)
-  count as taken from the start; the old keys of entries that *are*
-  rewritten do not, since they are about to disappear. Consequence:
-  inserting a colliding entry above an existing one shifts suffixes below
-  it; `--map` records the change and the phase-5 `--rewrite` consumes it.
-- Case: taken keys and reference matching are compared case-insensitively.
-  BibTeX matches cite keys case-insensitively (and warns about "case
-  mismatch"), so a generated `smith2020foo` next to a kept `Smith2020foo`
-  would be a trap. Generated keys are always lowercase ASCII, so this only
-  matters for keys the user chose.
-- `--only` keys that match no entry are reported as warnings, not errors:
-  with several files a key is expected to exist in only one of them.
-- The mapping is printed as `old  new`, old keys padded to one column; with
-  more than one input a third column names the file. `--map` writes
-  `old<TAB>new<TAB>file` for all inputs together. With `--write -` the
-  rewritten text goes to stdout and the mapping is not printed (use
-  `--map`).
+The name and title parsers produce `KeyParts { author, year, title }`.
+A `Style` combines those parts into a key. A template system similar to
+JabRef's could use another `Style` with the same parsed parts.
+
+### Decoding names and titles
+
+LaTeX decoding in `keys/latex.rs` works on a copy of the field text, leaving
+the tree unchanged. Braces are kept long enough to recognize corporate
+authors such as `{OpenAI}`, then removed.
+
+Math enclosed in `$...$` or `$$...$$` is removed from titles before LaTeX
+decoding. This lets the decoder distinguish an escaped `\$` from a math
+delimiter. If a title has an unmatched `$`, its text is kept with the `$`
+signs removed.
+
+The decoder uses `unicode-normalization` to put Unicode text into NFC,
+a standard form that gives equivalent accent spellings the same
+representation. It emits combining marks for accents, then normalizes the
+whole result. As a result, `\"o`, `\"{o}`, `{\"o}`, `{\" o}`, and `ö`
+produce the same text and the same ASCII key component.
+
+LaTeX commands follow TeX's rules:
+
+- A control word includes the longest run of letters after the backslash,
+  so `\oe` is one command.
+- White space after a recognized control word is consumed. For example,
+  `\o rsted` becomes `ørsted`.
+- White space before an accent's argument is skipped.
+- An unknown command without an argument is removed, but the white space
+  after it is kept so adjacent words stay separate. Some commands,
+  including `\textendash`, are deliberately treated as unknown.
+- The control space `\ ` and line break `\\` each become a space.
+
+### Fields that use macros
+
+An `author`, `editor`, or `title` containing a macro cannot be used to
+generate a key because boringbib does not resolve macros. For example,
+`author = goossens # and # mittelbach` causes the entry to be reported and
+left unchanged. A macro in `year` only omits the year component from the
+generated key.
+
+`--sort author` shares the name parser but uses macro names as text. This
+lets it order entries without needing to resolve the macros.
+
+### Updating references
+
+`keys` updates `crossref` and `xref`, along with the lists in `related`,
+`ids`, `entryset`, and `xdata`. A reference can be edited only when its
+value is a single `{...}` or `"..."` part. The text inside is replaced,
+and the original delimiters are kept.
+
+Other forms, such as macros or concatenated values, are reported and left
+unchanged. Within lists, surrounding white space is ignored when matching
+each key, and only a match for the whole key is replaced.
+
+### Avoiding duplicate keys
+
+Keys are assigned in file order. An entry gets its base key if that key is
+available. Otherwise it gets the first available suffix from `a`, `b`,
+through `z`, then `aa`, `ab`, and so on. For entries that would share a
+base key, this usually means the first gets the bare key and the second
+gets `a`.
+
+Keys belonging to entries that will stay unchanged are reserved before
+assignment starts. This includes entries excluded by `--only`, listed in
+`[keys] keep`, or skipped because they lack an author or title. Old keys
+of entries being renamed are available for reuse.
+
+Inserting an entry above another with the same base key can change the
+suffixes below it. `--map` records these changes. The planned `--rewrite`
+option will use that mapping to update citations in documents.
+
+Both duplicate detection and reference matching ignore case, as BibTeX
+does when matching citation keys. For example, if `Smith2020foo` is kept,
+`smith2020foo` is already taken. Generated keys contain only lowercase
+ASCII characters, so this distinction matters for existing keys.
+
+### Reports and mappings
+
+If a key passed to `--only` matches no entry, boringbib prints a warning.
+This allows the same selection to be used across several files, where a
+key may occur in only one of them.
+
+The key mapping is printed in `old  new` columns, with padding after old
+keys to align the new keys. With multiple input files, a third column
+shows the file name. `--map` saves the combined mapping as
+`old<TAB>new<TAB>file`.
+
+With `--write -`, stdout contains the rewritten bibliography. Use `--map`
+to save the mapping separately.
 
 ## Configuration
 
-`boringbib.toml`, discovered in the current directory or its ancestors,
-stopping after the first directory that contains `.git` (so a file outside
-the repository is never picked up); `--config PATH` overrides discovery and
-must exist. Two tables, `[fmt]` and `[keys]`, with keys named exactly like
-the long flags with underscores. Unknown keys are errors, so a typo cannot
-silently do nothing. `wrap = 0` means off; `sort_fields` is `false`, `true`
-(built-in order) or a list; `indent` is a number or `"tab"`.
+boringbib looks for `boringbib.toml` in the current directory, then in each
+parent directory. It stops after checking the first directory that
+contains `.git`, which keeps the search within the repository. You can
+choose a file with `--config PATH`; that file must exist.
 
-Resolution: command line over file over built-in default. To make that
-possible in both directions, every boolean flag has a `--no-...` twin
-(`--align`/`--no-align`, `--trailing-comma`/`--no-trailing-comma`,
-`--wrap N`/`--no-wrap`, `--sort-fields`/`--no-sort-fields`,
-`--keep-bom`/`--no-keep-bom`, `--sort X`/`--no-sort`); when both are given,
-the last one wins. `--sort-fields` takes its optional value only with `=`
-(`--sort-fields=author,title`), so that `boringbib fmt --sort-fields
-refs.bib` cannot swallow the file name.
+The file has two tables, `[fmt]` and `[keys]`. Their keys use the long
+option names with hyphens replaced by underscores. Unknown keys produce
+an error to help catch typos. A few settings accept more than one form:
+
+- `wrap = 0` disables wrapping.
+- `sort_fields` accepts `false`, `true` for the default order, or a list
+  of field names.
+- `indent` accepts a number of spaces or `"tab"`.
+
+Command line options override file settings, which override defaults.
+Options can be disabled as well as enabled from the command line:
+
+| Enable or choose | Disable |
+| --- | --- |
+| `--align` | `--no-align` |
+| `--trailing-comma` | `--no-trailing-comma` |
+| `--wrap N` | `--no-wrap` |
+| `--sort-fields` | `--no-sort-fields` |
+| `--keep-bom` | `--no-keep-bom` |
+| `--sort X` | `--no-sort` |
+
+When both forms are given, the last one wins. `--sort-fields` accepts an
+optional value only after `=`, as in `--sort-fields=author,title`. This
+lets `boringbib fmt --sort-fields refs.bib` treat `refs.bib` as a file name.
 
 ## Decision log
 
-Choices made where the brief was silent, with the property they serve.
+These decisions explain how boringbib preserves data and keeps its
+behavior predictable. The sections above describe the rules in detail.
 
-1. Spans into an owned source instead of a tree of owned strings:
-   losslessness by construction, edits as splices. (lossless)
-2. `\r` is white space; the tree never normalizes line endings; only the
-   printer chooses an ending, `auto` following the first line ending of the
-   input. (lossless, deterministic)
-3. `keys` keeps the byte-order mark and line endings; `fmt` drops the mark
-   unless `--keep-bom`. (lossless for `keys`, as specified for `fmt`)
-4. `@` is a block start only before `ident` + `{`/`(`; other `@` are junk;
-   a line-initial `@name` without delimiter warns. (lossless, no surprises)
-5. Identifiers may start with a digit and be non-ASCII; a bare value token
-   is a number only when entirely digits, otherwise a macro. (lossless)
-6. Empty keys are accepted. (lossless)
-7. `@comment` bodies are brace-balanced, not "skip to next `@`". (matches
-   every modern tool; the difference only shows for an `@` inside a comment)
-8. All blocks are printed with braces, `@comment` and `@preamble` included;
-   their bodies stay verbatim. (deterministic; always safe because bodies are
-   brace-balanced)
-9. White space in values collapses at every depth and the value is trimmed
-   as a whole, never per part. (idempotent, BibTeX-equivalent)
-10. Junk: leading and trailing blank lines dropped, everything else verbatim,
-    white-space-only junk dropped; junk after an entry's `}` on the same line
-    moves in front of the next block. (deterministic, idempotent)
-11. Entries without fields print as `@type{key` newline `}`. (matches LaTeX
-    Workshop; BibTeX accepts it)
-12. Empty input formats to empty output; otherwise exactly one trailing
-    newline. (idempotent)
-13. Unclosed delimiters are reported at the opening character; columns count
-    characters. (no surprises: that is where the fix goes and what editors
-    show)
-14. Duplicate fields are kept and warned about; the first one is the one
-    that counts. (lossless)
-15. In-place writes are temp-file-and-rename with permissions copied and
-    symlinks resolved; unchanged files are not rewritten; several files are
-    processed independently with exit status 2 over 1 over 0. (no surprises)
-16. Every boolean flag has a `--no-` twin; `--sort-fields` requires `=` for
-    its value; `--wrap 0` disables. (config overridable from the CLI;
-    unambiguous argument parsing)
-17. Unknown configuration keys are errors. (no surprises)
-18. Key collisions count unselected, kept and skipped keys as taken,
-    compared case-insensitively; keys are assigned in file order. (idempotent,
-    no BibTeX case-mismatch traps)
-19. NFC via `unicode-normalization`; math stripped before decoding; an
-    author or title that uses a macro is reported and skipped. (deterministic,
-    no invented keys)
-20. Reference fields are edited only when they are a single string part;
-    everything else is reported. (lossless)
-21. Entry types and field names are lowercased with ASCII rules; macro
-    names are never lowercased. (matches BibTeX's own folding; lossless
-    where the brief does not ask for a change)
-22. Errors name what was found; unclosed delimiters point at the opener;
-    `[` and friends are identifier characters, so `[x]` is a macro. (no
-    surprises, BibTeX-faithful)
-23. `--check` reports to stdout, `--diff` uses `a/` and `b/` headers, and
-    already-formatted files are silent. (composable with shell tooling)
-24. The LaTeX decoder follows TeX tokenization (longest control word, white
-    space after control words consumed, white space before accent arguments
-    skipped); unknown commands are deleted but keep the white space after
-    them; `\ ` and `\\` become a space. (deterministic; words stay apart)
-25. `keys` prints `old  new` columns (plus the file with several inputs),
-    reports go to stderr as warnings, and a missing `--only` key is a
-    warning. (composable; multi-file friendly)
-26. `--wrap` counts the trailing comma, never breaks next to a delimiter,
-    counts a tab as one column, and leaves `@string` values alone.
-    (idempotent; BibTeX-equivalent)
-27. `--sort-fields` compares names lowercase, sorts stably, and orders the
-    unknown fields alphabetically after the configured ones. (deterministic)
+1. The tree stores ranges in the original source text. This lets edits
+   replace selected ranges while preserving every other byte.
+2. The lexer treats `\r` as white space, and the tree preserves line
+   endings. The printer chooses the output ending, following the first
+   input ending when `auto` is set.
+3. `keys` preserves the byte order mark and line endings. `fmt` drops the
+   mark unless `--keep-bom` is set, as part of its formatting defaults.
+4. `@` starts a block only before an identifier and `{` or `(`. Other
+   occurrences remain text. A line starting with `@name` but missing an
+   opening delimiter produces a warning, except for `@comment`. This
+   preserves ordinary text while flagging likely mistakes.
+5. Identifiers may start with digits or contain characters outside ASCII.
+   Only a value made entirely of ASCII digits is a number; other bare
+   values are macros. This preserves input that BibTeX might reject.
+6. Empty keys are accepted so that parsing does not discard such entries.
+7. `@comment` bodies must have balanced braces. This matches biber,
+   JabRef, and `bibtex-tidy`, including when a comment contains `@`.
+8. All blocks are printed with braces, including `@comment` and
+   `@preamble`. Their contents are preserved apart from line endings.
+   Requiring balanced braces makes this conversion safe.
+9. White space is collapsed at every brace depth, then trimmed from the
+   whole value. Spaces between parts are preserved, matching what BibTeX
+   reads and making repeated formatting stable.
+10. Text outside blocks loses leading and trailing blank lines, but keeps
+    its other contents. Text made only of white space is removed. Text
+    after an entry's `}` on the same line moves before the next block.
+    These rules give comments and spacing a consistent layout.
+11. Entries without fields print as `@type{key` followed by a newline
+    and `}`. This matches LaTeX Workshop and is accepted by BibTeX.
+12. Empty input, including input containing only white space, produces
+    empty output. Other output ends with one newline, so formatting it
+    again adds nothing.
+13. Errors for unclosed delimiters point to the opening character.
+    Columns count characters, matching what an editor shows.
+14. Duplicate fields are preserved and produce a warning. The first
+    occurrence is used, matching BibTeX without losing the others.
+15. Files are updated by writing a temporary file and renaming it. This
+    preserves permissions and symbolic links and avoids partial writes.
+    Unchanged files keep their timestamps. Files are processed
+    independently, with exit status 2 taking precedence over 1 and 0.
+16. Options have a `--no-` form so file settings can be overridden from
+    the command line. `--sort-fields` requires `=` before its value to
+    distinguish it from a file name. `--wrap 0` disables wrapping.
+17. Unknown configuration keys produce errors so typos are easy to find.
+18. Keys of unchanged entries are reserved before new keys are assigned
+    in file order. Comparisons ignore case, preventing duplicates that
+    BibTeX would treat as the same key.
+19. Key generation uses NFC normalization and removes math before LaTeX
+    decoding. Entries whose author, editor, or title uses a macro are
+    reported and skipped because those values cannot be resolved.
+20. References are updated only when their value is one string part.
+    Other forms are reported and preserved rather than guessed at.
+21. Entry types and field names are lowercased using ASCII rules. Macro
+    names keep their spelling. This follows BibTeX's name matching while
+    limiting formatting changes to the names that need them.
+22. Errors describe what was found, with unclosed delimiters reported
+    at their opening character. Identifier punctuation follows BibTeX,
+    so `[x]` is a macro name.
+23. `--check` reports to stdout, and `--diff` uses `a/` and `b/` headers.
+    Files that are already formatted produce no report or diff. This
+    makes the output useful in shell scripts.
+24. LaTeX decoding follows TeX's command and argument rules. Unknown
+    commands keep the white space after them, while `\ ` and `\\`
+    become spaces. This keeps words separate during key generation.
+25. `keys` prints aligned old and new keys, adding file names for multiple
+    inputs. Warnings go to stderr. A missing `--only` key is a warning,
+    allowing a selection to span several files.
+26. `--wrap` counts trailing commas and treats a tab as one column. It
+    preserves spaces next to delimiters and leaves `@string` values
+    alone. The result has the same meaning to BibTeX and does not change
+    when formatted again.
+27. Field sorting compares lowercase names and preserves the order of
+    duplicates. Fields outside the configured order follow alphabetically,
+    giving a consistent result for every field name.
 
-## What was borrowed, and from where
+## Sources
 
-Read, not copied:
+These projects and references informed the design. Their code was read
+but not copied.
 
-- **LaTeX Workshop** (`src/lint/bibtex-formatter/utils.ts`, MIT): per-entry
-  alignment to the longest field name, the continuation indent for wrapped
-  values (tab + padded name + ` = ` + delimiter), `@string` blocks sorting
-  before entries, and the `localeCompare` key ordering that boringbib
-  replaces with lowercase byte comparison.
-- **bibtex-tidy** (MIT): option naming (`--sort-fields`, `--trailing-comma`,
-  `--wrap`, `--no-...` twins) and, as a counter-example, its `--generate-keys`:
-  it keeps hyphens (`fei-fei2006one-shot`), drops accented letters instead of
-  transliterating them (`schlkopf2002learning`), and leaves `crossref`
-  dangling after a rename.
-- **biblib** (`biblib/bib.py`, MIT): the identifier and key character
-  classes, the "number is a run of digits, else macro" rule, and BibTeX's
-  white space compression and trimming semantics for values.
-- **Tame the BeaST**, section on the `author` field: the three name forms,
-  comma counting, and the "first lowercase-initial token starts the von
-  part" rule.
+- **LaTeX Workshop** (`src/lint/bibtex-formatter/utils.ts`, MIT) provided
+  the model for aligning fields within an entry and indenting wrapped
+  values. It also places `@string` blocks before entries. boringbib
+  replaces its `localeCompare` sorting with lowercase byte comparison so
+  that the order is the same on every machine.
+- **`bibtex-tidy`** (MIT) informed option names such as `--sort-fields`,
+  `--trailing-comma`, `--wrap`, and their `--no-` forms. Its
+  `--generate-keys` behavior also helped identify changes needed here:
+  it keeps hyphens (`fei-fei2006one-shot`), drops accented letters
+  (`schlkopf2002learning`), and leaves `crossref` pointing to old keys.
+- **biblib** (`biblib/bib.py`, MIT) provided the character rules for
+  identifiers and keys. It also documents how BibTeX distinguishes numbers
+  from macros and how it collapses and trims white space in values.
+- **Tame the BeaST**, in its section on the `author` field, describes the
+  three name forms and how commas distinguish them. It also explains
+  where the "von" part begins: at the first token whose initial letter
+  is lowercase.
